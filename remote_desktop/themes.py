@@ -991,6 +991,77 @@ QPushButton#confirmOk[danger="true"]:hover {{
 QPushButton#confirmOk[danger="true"]:pressed {{
     background: {danger_pressed};
 }}
+QPushButton#remoteNavBtn {{
+    background: {c.btn_bg};
+    color: {c.text};
+    border: 1px solid {c.line};
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-weight: 600;
+    min-width: 56px;
+}}
+QPushButton#remoteNavBtn:hover {{
+    background: {c.btn_hover};
+}}
+QPushButton#remoteNavBtn:pressed {{
+    background: {btn_pressed};
+    border-color: {c.accent};
+    padding: 8px 11px 6px 13px;
+}}
+QPushButton#remoteNavBtn:disabled {{
+    color: {c.muted};
+    background: {c.card};
+}}
+QTableWidget#remoteFileTable {{
+    background: {c.input_bg};
+    color: {c.text};
+    border: 1px solid {c.line};
+    border-radius: 10px;
+    gridline-color: transparent;
+    outline: 0;
+    padding: 2px;
+    selection-background-color: {c.card_selected};
+    selection-color: {c.text};
+    alternate-background-color: {_rgba(c.text, 0.04)};
+}}
+QTableWidget#remoteFileTable::item {{
+    color: {c.text};
+    background: transparent;
+    padding: 4px 10px;
+    border: none;
+}}
+QTableWidget#remoteFileTable::item:hover {{
+    background: {_rgba(c.accent, 0.10)};
+    color: {c.text};
+}}
+QTableWidget#remoteFileTable::item:selected {{
+    background: {c.card_selected};
+    color: {c.text};
+}}
+QTableWidget#remoteFileTable::item:selected:hover {{
+    background: {c.card_selected};
+    color: {c.text};
+}}
+QTableWidget#remoteFileTable QHeaderView::section {{
+    background: {c.card};
+    color: {c.muted};
+    border: none;
+    border-bottom: 1px solid {c.line};
+    border-right: 1px solid transparent;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 700;
+}}
+QTableWidget#remoteFileTable QHeaderView::section:first {{
+    border-top-left-radius: 10px;
+}}
+QTableWidget#remoteFileTable QHeaderView::section:last {{
+    border-top-right-radius: 10px;
+}}
+QTableWidget#remoteFileTable QCornerButton::section {{
+    background: {c.card};
+    border: none;
+}}
 QFrame#viewerChromeBar {{
     background: {chrome_bg};
     border: none;

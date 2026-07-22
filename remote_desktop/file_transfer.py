@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Optional
 
 from .protocol import pack_file_message, unpack_file_message
@@ -140,6 +140,44 @@ def resolve_browse_path(path: str | None) -> Path:
     if not text:
         return Path.home()
     return Path(text).expanduser()
+
+
+def remote_parent_path(path: str | None) -> str:
+    """Parent of a remote path using the remote OS's path rules.
+
+    Controllers must not use local ``Path(...).parent`` — on Windows that turns
+    a Linux path like ``/home/u`` into ``\\home``, which then fails to list.
+    Empty string means "browse roots".
+    """
+    text = (path or "").strip()
+    if not text:
+        return ""
+    # POSIX absolute (exclude UNC ``//server/...``).
+    if text.startswith("/") and not text.startswith("//"):
+        p = PurePosixPath(text)
+        parent = p.parent
+        if parent == p:
+            return ""
+        return str(parent)
+    looks_win = (
+        (len(text) >= 2 and text[0].isalpha() and text[1] == ":")
+        or text.startswith("\\\\")
+        or text.startswith("//")
+    )
+    if looks_win or ("\\" in text):
+        p = PureWindowsPath(text)
+        parent = p.parent
+        if parent == p:
+            return ""
+        out = str(parent)
+        if len(out) == 2 and out[1] == ":":
+            out += "\\"
+        return out
+    p = PurePosixPath(text)
+    parent = p.parent
+    if parent == p:
+        return ""
+    return str(parent)
 
 
 def list_directory(path: str | None) -> tuple[str, list[dict[str, Any]]]:

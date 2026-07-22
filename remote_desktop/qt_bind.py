@@ -46,6 +46,9 @@ try:
         QScrollArea,
         QShortcut,
         QSplitter,
+        QStyle,
+        QStyledItemDelegate,
+        QStyleOptionViewItem,
         QTableWidget,
         QTableWidgetItem,
         QVBoxLayout,
@@ -95,6 +98,9 @@ except ImportError:  # pragma: no cover - modern hosts
         QPushButton,
         QScrollArea,
         QSplitter,
+        QStyle,
+        QStyledItemDelegate,
+        QStyleOptionViewItem,
         QTableWidget,
         QTableWidgetItem,
         QVBoxLayout,
@@ -184,6 +190,26 @@ PointingHandCursor = _enum(
 AlignCenter = _enum(
     getattr(Qt, "AlignCenter", None),
     getattr(getattr(Qt, "AlignmentFlag", None), "AlignCenter", None),
+)
+AlignLeft = _enum(
+    getattr(Qt, "AlignLeft", None),
+    getattr(getattr(Qt, "AlignmentFlag", None), "AlignLeft", None),
+)
+AlignRight = _enum(
+    getattr(Qt, "AlignRight", None),
+    getattr(getattr(Qt, "AlignmentFlag", None), "AlignRight", None),
+)
+AlignVCenter = _enum(
+    getattr(Qt, "AlignVCenter", None),
+    getattr(getattr(Qt, "AlignmentFlag", None), "AlignVCenter", None),
+)
+Fixed = _enum(
+    getattr(QHeaderView, "Fixed", None),
+    getattr(getattr(QHeaderView, "ResizeMode", None), "Fixed", None),
+)
+ResizeToContents = _enum(
+    getattr(QHeaderView, "ResizeToContents", None),
+    getattr(getattr(QHeaderView, "ResizeMode", None), "ResizeToContents", None),
 )
 AA_DontShowIconsInMenus = _enum(
     getattr(Qt, "AA_DontShowIconsInMenus", None),

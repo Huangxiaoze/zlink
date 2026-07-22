@@ -11,31 +11,45 @@ from .file_transfer import (
     MAX_FILE_BYTES,
     pack_download_request,
     pack_list_request,
+    remote_parent_path,
 )
 from .i18n import i18n
 from .qt_bind import (
+    AlignLeft,
+    AlignRight,
+    AlignVCenter,
+    Fixed,
     NoEditTriggers,
     NoFocus,
     PointingHandCursor,
+    QColor,
     QDialog,
+    QFont,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPainter,
     QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    ResizeToContents,
     SelectRows,
     SingleSelection,
     Stretch,
+    UserRole,
     WA_StyledBackground,
 )
+from .themes import CURRENT
 
 
 def _fmt_size(size: int, is_dir: bool) -> str:
     if is_dir:
-        return ""
+        return "—"
     if size < 1024:
         return "%d B" % size
     if size < 1024 * 1024:
@@ -47,11 +61,124 @@ def _fmt_size(size: int, is_dir: bool) -> str:
 
 def _fmt_mtime(ts: int) -> str:
     if not ts:
-        return ""
+        return "—"
     try:
         return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
     except (OverflowError, OSError, ValueError):
-        return ""
+        return "—"
+
+
+def _align(item: QTableWidgetItem, *flags: Any) -> None:
+    value = 0
+    for flag in flags:
+        try:
+            value |= int(flag)
+        except (TypeError, ValueError):
+            value |= int(getattr(flag, "value", 0) or 0)
+    try:
+        item.setTextAlignment(value)
+    except Exception:
+        pass
+
+
+def _align_flags(*flags: Any) -> int:
+    value = 0
+    for flag in flags:
+        try:
+            value |= int(flag)
+        except (TypeError, ValueError):
+            value |= int(getattr(flag, "value", 0) or 0)
+    return value
+
+
+def _state_flag(name: str) -> Any:
+    for obj in (
+        getattr(QStyle, "StateFlag", None),
+        getattr(QStyle, "State", None),
+        QStyle,
+    ):
+        if obj is None:
+            continue
+        flag = getattr(obj, name, None)
+        if flag is not None:
+            return flag
+    return None
+
+
+def _has_state(state: Any, name: str) -> bool:
+    flag = _state_flag(name)
+    if flag is None:
+        return False
+    try:
+        return bool(state & flag)
+    except Exception:
+        return False
+
+
+class RemoteFileItemDelegate(QStyledItemDelegate):
+    """Paint row chrome + text ourselves.
+
+    Mixing QSS ``drawControl`` with manual ``drawText`` is unreliable: the style
+    may still paint model text, then a mismatched pen covers file names.
+    """
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # type: ignore[override]
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        entry = index.sibling(index.row(), 0).data(UserRole)
+        is_dir = isinstance(entry, dict) and bool(entry.get("is_dir"))
+        col = index.column()
+        text = str(index.data() or "")
+
+        selected = _has_state(opt.state, "State_Selected")
+        hover = _has_state(opt.state, "State_MouseOver")
+
+        painter.save()
+        painter.setClipRect(opt.rect)
+
+        # Background from the same palette as text colors → always readable.
+        painter.fillRect(opt.rect, QColor(CURRENT.input_bg))
+        if (index.row() % 2) == 1 and not selected:
+            alt = QColor(CURRENT.text)
+            alt.setAlpha(12)
+            painter.fillRect(opt.rect, alt)
+        if hover and not selected:
+            wash = QColor(CURRENT.accent)
+            wash.setAlpha(26)
+            painter.fillRect(opt.rect, wash)
+        if selected:
+            painter.fillRect(opt.rect, QColor(CURRENT.card_selected))
+
+        if col == 0:
+            color = QColor(CURRENT.accent if is_dir else CURRENT.text)
+            label = ("▸  %s" % text) if is_dir else ("    %s" % text)
+            font = QFont(opt.font)
+            if is_dir:
+                font.setBold(True)
+            align = _align_flags(AlignLeft, AlignVCenter)
+        elif col == 1:
+            color = QColor(CURRENT.accent if is_dir else CURRENT.muted)
+            label = text
+            font = QFont(opt.font)
+            if is_dir:
+                font.setBold(True)
+            align = _align_flags(AlignLeft, AlignVCenter)
+        elif col == 2:
+            color = QColor(CURRENT.muted)
+            label = text
+            font = QFont(opt.font)
+            align = _align_flags(AlignRight, AlignVCenter)
+        else:
+            color = QColor(CURRENT.muted)
+            label = text
+            font = QFont(opt.font)
+            align = _align_flags(AlignLeft, AlignVCenter)
+
+        painter.setPen(color)
+        painter.setFont(font)
+        painter.drawText(opt.rect.adjusted(10, 0, -8, 0), align, label)
+        painter.restore()
 
 
 class RemoteFileBrowser(QDialog):
@@ -66,8 +193,8 @@ class RemoteFileBrowser(QDialog):
         self.setObjectName("confirmDialog")
         make_frameless_dialog(self)
         self.setWindowTitle(i18n.t("remote_files_title"))
-        self.setMinimumSize(640, 420)
-        self.resize(720, 480)
+        self.setMinimumSize(680, 440)
+        self.resize(760, 520)
 
         self._send_packet = send_packet
         self._current_path = ""
@@ -82,27 +209,28 @@ class RemoteFileBrowser(QDialog):
         body = QWidget()
         body_l = QVBoxLayout(body)
         body_l.setContentsMargins(20, 14, 20, 16)
-        body_l.setSpacing(10)
+        body_l.setSpacing(12)
 
         nav = QHBoxLayout()
         nav.setSpacing(8)
         self.btn_up = QPushButton(i18n.t("remote_files_up"))
-        self.btn_up.setObjectName("confirmCancel")
+        self.btn_up.setObjectName("remoteNavBtn")
         self.btn_up.setCursor(PointingHandCursor)
         self.btn_up.setFocusPolicy(NoFocus)
         self.btn_up.clicked.connect(self._go_up)
         self.btn_roots = QPushButton(i18n.t("remote_files_roots"))
-        self.btn_roots.setObjectName("confirmCancel")
+        self.btn_roots.setObjectName("remoteNavBtn")
         self.btn_roots.setCursor(PointingHandCursor)
         self.btn_roots.setFocusPolicy(NoFocus)
         self.btn_roots.clicked.connect(lambda: self.request_list(""))
         self.btn_refresh = QPushButton(i18n.t("remote_files_refresh"))
-        self.btn_refresh.setObjectName("confirmCancel")
+        self.btn_refresh.setObjectName("remoteNavBtn")
         self.btn_refresh.setCursor(PointingHandCursor)
         self.btn_refresh.setFocusPolicy(NoFocus)
         self.btn_refresh.clicked.connect(self._refresh)
         self.edit_path = QLineEdit()
         self.edit_path.setObjectName("confirmInput")
+        self.edit_path.setPlaceholderText(i18n.t("remote_files_path_hint"))
         self.edit_path.returnPressed.connect(self._go_path)
         nav.addWidget(self.btn_up)
         nav.addWidget(self.btn_roots)
@@ -110,11 +238,12 @@ class RemoteFileBrowser(QDialog):
         nav.addWidget(self.edit_path, 1)
         body_l.addLayout(nav)
 
-        self.table = QTableWidget(0, 3)
+        self.table = QTableWidget(0, 4)
         self.table.setObjectName("remoteFileTable")
         self.table.setHorizontalHeaderLabels(
             [
                 i18n.t("remote_files_col_name"),
+                i18n.t("remote_files_col_type"),
                 i18n.t("remote_files_col_size"),
                 i18n.t("remote_files_col_mtime"),
             ]
@@ -123,11 +252,26 @@ class RemoteFileBrowser(QDialog):
         self.table.setSelectionMode(SingleSelection)
         self.table.setEditTriggers(NoEditTriggers)
         self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setFocusPolicy(NoFocus)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(34)
         header = self.table.horizontalHeader()
-        header.setStretchLastSection(True)
+        header.setHighlightSections(False)
+        try:
+            header.setDefaultAlignment(int(AlignLeft) | int(AlignVCenter))
+        except Exception:
+            pass
+        header.setStretchLastSection(False)
         header.setSectionResizeMode(0, Stretch)
+        header.setSectionResizeMode(1, ResizeToContents)
+        header.setSectionResizeMode(2, Fixed)
+        header.setSectionResizeMode(3, Fixed)
+        self.table.setColumnWidth(2, 96)
+        self.table.setColumnWidth(3, 132)
         self.table.cellDoubleClicked.connect(self._on_double_click)
+        self._item_delegate = RemoteFileItemDelegate(self.table)
+        self.table.setItemDelegate(self._item_delegate)
         body_l.addWidget(self.table, 1)
 
         foot = QHBoxLayout()
@@ -214,14 +358,26 @@ class RemoteFileBrowser(QDialog):
             is_dir = bool(entry.get("is_dir"))
             size = int(entry.get("size") or 0)
             mtime = int(entry.get("mtime") or 0)
-            prefix = "[DIR] " if is_dir else ""
-            item_name = QTableWidgetItem(prefix + name)
-            item_name.setData(256, entry)  # Qt.UserRole == 256
+
+            item_name = QTableWidgetItem(name)
+            item_name.setData(UserRole, entry)
+            _align(item_name, AlignLeft, AlignVCenter)
+
+            item_type = QTableWidgetItem(
+                i18n.t("remote_files_type_dir") if is_dir else i18n.t("remote_files_type_file")
+            )
+            _align(item_type, AlignLeft, AlignVCenter)
+
             item_size = QTableWidgetItem(_fmt_size(size, is_dir))
+            _align(item_size, AlignRight, AlignVCenter)
+
             item_mtime = QTableWidgetItem(_fmt_mtime(mtime))
+            _align(item_mtime, AlignLeft, AlignVCenter)
+
             self.table.setItem(row, 0, item_name)
-            self.table.setItem(row, 1, item_size)
-            self.table.setItem(row, 2, item_mtime)
+            self.table.setItem(row, 1, item_type)
+            self.table.setItem(row, 2, item_size)
+            self.table.setItem(row, 3, item_mtime)
 
     def _selected_entry(self) -> Optional[dict[str, Any]]:
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
@@ -234,14 +390,14 @@ class RemoteFileBrowser(QDialog):
             item = self.table.item(rows[0].row(), 0)
         if item is None:
             return None
-        data = item.data(256)
+        data = item.data(UserRole)
         return data if isinstance(data, dict) else None
 
     def _on_double_click(self, row: int, _col: int) -> None:
         item = self.table.item(row, 0)
         if item is None:
             return
-        entry = item.data(256)
+        entry = item.data(UserRole)
         if not isinstance(entry, dict):
             return
         if entry.get("is_dir"):
@@ -282,14 +438,7 @@ class RemoteFileBrowser(QDialog):
             self._set_status(i18n.t("file_transfer_failed", error=str(exc)))
 
     def _go_up(self) -> None:
-        if not self._current_path:
-            self.request_list("")
-            return
-        parent = str(Path(self._current_path).parent)
-        if parent == self._current_path:
-            self.request_list("")
-        else:
-            self.request_list(parent)
+        self.request_list(remote_parent_path(self._current_path))
 
     def _go_path(self) -> None:
         text = self.edit_path.text().strip()
