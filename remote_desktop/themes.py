@@ -185,13 +185,286 @@ FOREST = ThemeColors(
     splitter="#C2D4C8",
 )
 
+OCEAN = ThemeColors(
+    id="ocean",
+    bg="#EAF2F7",
+    card="#FFFFFF",
+    text="#132836",
+    muted="#5E7586",
+    line="#C7D7E3",
+    accent="#1F7FAF",
+    accent_2="#186890",
+    danger="#D05050",
+    danger_hover="#B74242",
+    warn="#C08A1E",
+    online="#1A8F6A",
+    offline="#C44545",
+    online_bg="#D7F0E6",
+    offline_bg="#F7E1E1",
+    unknown_bg="#E4EDF3",
+    input_bg="#FFFFFF",
+    input_border="#C7D7E3",
+    btn_bg="#EFF5F9",
+    btn_hover="#E1EBF2",
+    card_tile="#F1F7FB",
+    card_tile_hover="#E6F1F8",
+    card_selected="#D9ECF7",
+    scroll="#B5C8D6",
+    side="#102433",
+    side_2="#173247",
+    side_line="#27485E",
+    side_text="#F1F8FC",
+    side_muted="#95B0C2",
+    side_soft="#C9DCE8",
+    side_input_bg="#0C1C28",
+    side_input_text="#E7F3FA",
+    side_input_border="#27485E",
+    side_check="#9CB8C9",
+    pass_value="#7ED7FF",
+    host_ok="#7ED7FF",
+    ghost_bg="#1A3346",
+    ghost_hover="#234257",
+    ghost_border="#31556C",
+    ghost_text="#E7F3FA",
+    splitter="#C7D7E3",
+)
+
+MIDNIGHT = ThemeColors(
+    id="midnight",
+    bg="#0D1524",
+    card="#152238",
+    text="#E6EEF8",
+    muted="#9AADC4",
+    line="#2A3D58",
+    accent="#4C8DFF",
+    accent_2="#3A74DB",
+    danger="#E25B6A",
+    danger_hover="#C94A58",
+    warn="#E0B04A",
+    online="#3DDC97",
+    offline="#FF7A8A",
+    online_bg="#17382E",
+    offline_bg="#3A2228",
+    unknown_bg="#1E2C40",
+    input_bg="#101B2D",
+    input_border="#2A3D58",
+    btn_bg="#1A2A40",
+    btn_hover="#233552",
+    card_tile="#1A2A40",
+    card_tile_hover="#223650",
+    card_selected="#1A3050",
+    scroll="#3A5070",
+    side="#09101C",
+    side_2="#121C2E",
+    side_line="#243652",
+    side_text="#F0F5FC",
+    side_muted="#93A7C0",
+    side_soft="#C4D2E6",
+    side_input_bg="#070E18",
+    side_input_text="#E8F0FA",
+    side_input_border="#243652",
+    side_check="#9BB0C8",
+    pass_value="#9EC1FF",
+    host_ok="#9EC1FF",
+    ghost_bg="#18263C",
+    ghost_hover="#223352",
+    ghost_border="#314866",
+    ghost_text="#E8F0FA",
+    splitter="#2A3D58",
+)
+
+GRAPHITE = ThemeColors(
+    id="graphite",
+    bg="#EDEFF1",
+    card="#FFFFFF",
+    text="#1B1F24",
+    muted="#6B737C",
+    line="#D2D7DD",
+    accent="#4A5562",
+    accent_2="#3A4450",
+    danger="#C94B4B",
+    danger_hover="#B03F3F",
+    warn="#B8860B",
+    online="#2F8F5B",
+    offline="#C0392B",
+    online_bg="#DCF0E4",
+    offline_bg="#F6E1DF",
+    unknown_bg="#E8EBEE",
+    input_bg="#FFFFFF",
+    input_border="#D2D7DD",
+    btn_bg="#F3F5F7",
+    btn_hover="#E7EAEE",
+    card_tile="#F5F6F8",
+    card_tile_hover="#EEEFF2",
+    card_selected="#E4E8ED",
+    scroll="#B8C0C8",
+    side="#1A1E24",
+    side_2="#242A32",
+    side_line="#3A424C",
+    side_text="#F4F6F8",
+    side_muted="#A0A8B2",
+    side_soft="#D5DAE0",
+    side_input_bg="#12151A",
+    side_input_text="#EEF1F4",
+    side_input_border="#3A424C",
+    side_check="#A7AFB8",
+    pass_value="#D0D6DE",
+    host_ok="#B8F0C8",
+    ghost_bg="#2C333C",
+    ghost_hover="#3A424C",
+    ghost_border="#4A5360",
+    ghost_text="#EEF1F4",
+    splitter="#D2D7DD",
+)
+
+DUSK = ThemeColors(
+    id="dusk",
+    bg="#1A1412",
+    card="#261C19",
+    text="#F3E9E2",
+    muted="#B5A398",
+    line="#43342E",
+    accent="#E08A3E",
+    accent_2="#C4732E",
+    danger="#E05A5A",
+    danger_hover="#C84A4A",
+    warn="#E0B04A",
+    online="#5CBF7A",
+    offline="#FF7A7A",
+    online_bg="#1F3528",
+    offline_bg="#3A2222",
+    unknown_bg="#322622",
+    input_bg="#1E1714",
+    input_border="#43342E",
+    btn_bg="#2E221E",
+    btn_hover="#3A2C27",
+    card_tile="#2E221E",
+    card_tile_hover="#3A2C27",
+    card_selected="#3A2A20",
+    scroll="#5A463E",
+    side="#120E0C",
+    side_2="#1E1613",
+    side_line="#3A2C27",
+    side_text="#FAF1EA",
+    side_muted="#B5A398",
+    side_soft="#E0D0C4",
+    side_input_bg="#0E0A09",
+    side_input_text="#F3E9E2",
+    side_input_border="#3A2C27",
+    side_check="#B9A89C",
+    pass_value="#FFC48A",
+    host_ok="#FFC48A",
+    ghost_bg="#2A1F1B",
+    ghost_hover="#3A2C27",
+    ghost_border="#4A3A33",
+    ghost_text="#F3E9E2",
+    splitter="#43342E",
+)
+
+FROST = ThemeColors(
+    id="frost",
+    bg="#F2F6FA",
+    card="#FFFFFF",
+    text="#1A2A36",
+    muted="#6A7F90",
+    line="#D3DEE8",
+    accent="#3A9EAE",
+    accent_2="#2F8492",
+    danger="#D05050",
+    danger_hover="#B74242",
+    warn="#C08A1E",
+    online="#1F9A6A",
+    offline="#C44545",
+    online_bg="#D8F2E6",
+    offline_bg="#F7E1E1",
+    unknown_bg="#E8EFF4",
+    input_bg="#FFFFFF",
+    input_border="#D3DEE8",
+    btn_bg="#F0F5F8",
+    btn_hover="#E4ECF2",
+    card_tile="#F4F8FB",
+    card_tile_hover="#EAF3F6",
+    card_selected="#DDF1F4",
+    scroll="#B7C7D4",
+    side="#143039",
+    side_2="#1B3D48",
+    side_line="#2D5562",
+    side_text="#F2FBFC",
+    side_muted="#9BB7C0",
+    side_soft="#CDE2E8",
+    side_input_bg="#0F262D",
+    side_input_text="#EAF7F9",
+    side_input_border="#2D5562",
+    side_check="#A3BEC7",
+    pass_value="#8FE7F0",
+    host_ok="#8FE7F0",
+    ghost_bg="#1E4450",
+    ghost_hover="#285664",
+    ghost_border="#366675",
+    ghost_text="#EAF7F9",
+    splitter="#D3DEE8",
+)
+
+AMBER = ThemeColors(
+    id="amber",
+    bg="#F7F1E8",
+    card="#FFFBF5",
+    text="#2A2116",
+    muted="#7A6A55",
+    line="#E2D4BF",
+    accent="#C47A12",
+    accent_2="#A6650E",
+    danger="#C94B4B",
+    danger_hover="#B03F3F",
+    warn="#B8860B",
+    online="#2F8F5B",
+    offline="#C0392B",
+    online_bg="#DCF0E4",
+    offline_bg="#F6E1DF",
+    unknown_bg="#EEE6DA",
+    input_bg="#FFFFFF",
+    input_border="#E2D4BF",
+    btn_bg="#F3EADF",
+    btn_hover="#E9DDCE",
+    card_tile="#F4ECE1",
+    card_tile_hover="#EDE2D3",
+    card_selected="#F0E0C8",
+    scroll="#C9B8A0",
+    side="#2A2118",
+    side_2="#3A2E22",
+    side_line="#534433",
+    side_text="#FFF8EE",
+    side_muted="#C2B19A",
+    side_soft="#E8D9C4",
+    side_input_bg="#1E1812",
+    side_input_text="#FFF6EB",
+    side_input_border="#534433",
+    side_check="#C7B59C",
+    pass_value="#FFD28A",
+    host_ok="#FFD28A",
+    ghost_bg="#3F3225",
+    ghost_hover="#524233",
+    ghost_border="#65533F",
+    ghost_text="#FFF6EB",
+    splitter="#E2D4BF",
+)
+
 THEMES: Dict[str, ThemeColors] = {
     LIGHT.id: LIGHT,
     DARK.id: DARK,
     FOREST.id: FOREST,
+    OCEAN.id: OCEAN,
+    MIDNIGHT.id: MIDNIGHT,
+    GRAPHITE.id: GRAPHITE,
+    DUSK.id: DUSK,
+    FROST.id: FROST,
+    AMBER.id: AMBER,
 }
 
 DEFAULT_THEME = LIGHT.id
+
+# Process-wide active palette (updated when the UI theme changes).
+CURRENT: ThemeColors = LIGHT
 
 
 def theme_ids() -> Tuple[str, ...]:
@@ -202,6 +475,12 @@ def resolve_theme(theme_id: str | None) -> ThemeColors:
     if theme_id and theme_id in THEMES:
         return THEMES[theme_id]
     return THEMES[DEFAULT_THEME]
+
+
+def set_current_theme(theme_id: str | None) -> ThemeColors:
+    global CURRENT
+    CURRENT = resolve_theme(theme_id)
+    return CURRENT
 
 
 def iter_themes() -> Iterable[ThemeColors]:
@@ -425,5 +704,67 @@ QMessageBox {{
 }}
 QMessageBox QLabel {{
     color: {c.text};
+}}
+QDialog#confirmDialog {{
+    background: {c.card};
+    color: {c.text};
+}}
+QFrame#confirmAccent {{
+    background: {c.accent};
+    border: none;
+    min-height: 4px;
+    max-height: 4px;
+}}
+QFrame#confirmAccent[danger="true"] {{
+    background: {c.danger};
+}}
+QLabel#confirmEyebrow {{
+    color: {c.muted};
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}}
+QLabel#confirmTitle {{
+    color: {c.text};
+    font-size: 18px;
+    font-weight: 800;
+}}
+QLabel#confirmMessage {{
+    color: {c.muted};
+    font-size: 13px;
+}}
+QFrame#confirmFooter {{
+    background: transparent;
+    border-top: 1px solid {c.line};
+}}
+QPushButton#confirmCancel {{
+    background: {c.btn_bg};
+    color: {c.text};
+    border: 1px solid {c.line};
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-weight: 600;
+    min-width: 96px;
+}}
+QPushButton#confirmCancel:hover {{
+    background: {c.btn_hover};
+}}
+QPushButton#confirmOk {{
+    background: {c.accent};
+    color: #FFFFFF;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-weight: 700;
+    min-width: 96px;
+}}
+QPushButton#confirmOk:hover {{
+    background: {c.accent_2};
+}}
+QPushButton#confirmOk[danger="true"] {{
+    background: {c.danger};
+}}
+QPushButton#confirmOk[danger="true"]:hover {{
+    background: {c.danger_hover};
 }}
 """

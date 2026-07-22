@@ -22,6 +22,7 @@ try:
         QWheelEvent,
     )
     from PySide2.QtWidgets import (
+        QAbstractButton,
         QApplication,
         QCheckBox,
         QComboBox,
@@ -67,6 +68,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QWheelEvent,
     )
     from PySide6.QtWidgets import (
+        QAbstractButton,
         QApplication,
         QCheckBox,
         QComboBox,
@@ -117,6 +119,10 @@ WA_TransparentForMouseEvents = _enum(
 WA_DeleteOnClose = _enum(
     getattr(Qt, "WA_DeleteOnClose", None),
     getattr(getattr(Qt, "WidgetAttribute", None), "WA_DeleteOnClose", None),
+)
+WA_StyledBackground = _enum(
+    getattr(Qt, "WA_StyledBackground", None),
+    getattr(getattr(Qt, "WidgetAttribute", None), "WA_StyledBackground", None),
 )
 StrongFocus = _enum(
     getattr(Qt, "StrongFocus", None),
@@ -171,6 +177,14 @@ SmoothPixmapTransform = _enum(
     getattr(QPainter, "SmoothPixmapTransform", None),
     getattr(getattr(QPainter, "RenderHint", None), "SmoothPixmapTransform", None),
 )
+Antialiasing = _enum(
+    getattr(QPainter, "Antialiasing", None),
+    getattr(getattr(QPainter, "RenderHint", None), "Antialiasing", None),
+)
+NoPen = _enum(
+    getattr(Qt, "NoPen", None),
+    getattr(getattr(Qt, "PenStyle", None), "NoPen", None),
+)
 Format_RGB32 = _enum(
     getattr(QImage, "Format_RGB32", None),
     getattr(getattr(QImage, "Format", None), "Format_RGB32", None),
@@ -186,6 +200,10 @@ DialogAccepted = _enum(
 Yes = _enum(
     getattr(QMessageBox, "Yes", None),
     getattr(getattr(QMessageBox, "StandardButton", None), "Yes", None),
+)
+No = _enum(
+    getattr(QMessageBox, "No", None),
+    getattr(getattr(QMessageBox, "StandardButton", None), "No", None),
 )
 Save = _enum(
     getattr(QDialogButtonBox, "Save", None),

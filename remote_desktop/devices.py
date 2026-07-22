@@ -93,9 +93,11 @@ class DeviceStore:
         lang = str(settings.get("language") or "zh_CN")
         if lang not in {"zh_CN", "en_US"}:
             lang = "zh_CN"
-        theme = str(settings.get("theme") or "light")
-        if theme not in {"light", "dark", "forest"}:
-            theme = "light"
+        from .themes import DEFAULT_THEME, theme_ids
+
+        theme = str(settings.get("theme") or DEFAULT_THEME)
+        if theme not in set(theme_ids()):
+            theme = DEFAULT_THEME
         version = int(settings.get("settings_version") or 0)
         jpeg_quality = int(settings.get("jpeg_quality", 90))
         scale = float(settings.get("scale", 1.0))

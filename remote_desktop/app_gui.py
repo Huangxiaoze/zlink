@@ -7,13 +7,17 @@ import time
 
 from .qt_bind import (
     AA_DontShowIconsInMenus,
+    Antialiasing,
     Cancel,
     DialogAccepted,
     Horizontal,
+    NoFocus,
+    NoPen,
     Password,
     PointingHandCursor,
+    QAbstractButton,
     QApplication,
-    QCheckBox,
+    QColor,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -25,6 +29,7 @@ from .qt_bind import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPainter,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -47,7 +52,15 @@ from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, pro
 from .host import RemoteHost
 from .i18n import i18n
 from .qt_fonts import apply_app_font, ensure_utf8_stdio
-from .themes import DEFAULT_THEME, ThemeColors, build_stylesheet, resolve_theme
+from .confirm_dialog import ask_confirm
+from .themes import (
+    DEFAULT_THEME,
+    ThemeColors,
+    build_stylesheet,
+    resolve_theme,
+    set_current_theme,
+    theme_ids,
+)
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +70,7 @@ THEME: ThemeColors = resolve_theme(DEFAULT_THEME)
 
 def apply_theme(app: QApplication | None, theme_id: str | None) -> ThemeColors:
     global THEME
-    THEME = resolve_theme(theme_id)
+    THEME = set_current_theme(theme_id)
     if app is not None:
         app.setStyleSheet(build_stylesheet(THEME.id))
     return THEME
@@ -69,6 +82,37 @@ def _status_style(status_key: str) -> tuple[str, str]:
     if status_key == "offline":
         return i18n.t("offline"), "color:%s; background:%s;" % (THEME.offline, THEME.offline_bg)
     return i18n.t("unknown"), "color:%s; background:%s;" % (THEME.muted, THEME.unknown_bg)
+
+
+class ToggleSwitch(QAbstractButton):
+    """Compact pill switch for the dark side rail."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(PointingHandCursor)
+        self.setFocusPolicy(NoFocus)
+        self.setFixedSize(46, 26)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(Antialiasing, True)
+        checked = self.isChecked()
+        track = QColor(THEME.accent if checked else THEME.side_line)
+        thumb = QColor("#FFFFFF")
+        if not self.isEnabled():
+            track = QColor(THEME.side_line)
+            thumb = QColor("#C8D0D6")
+
+        painter.setPen(NoPen)
+        painter.setBrush(track)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 13, 13)
+
+        margin = 3
+        diameter = self.height() - margin * 2
+        x = self.width() - margin - diameter if checked else margin
+        painter.setBrush(thumb)
+        painter.drawEllipse(x, margin, diameter, diameter)
 
 
 class DeviceCard(QFrame):
@@ -240,9 +284,11 @@ class SettingsDialog(QDialog):
         self.lang.setCurrentIndex(max(0, idx))
 
         self.theme = QComboBox()
-        self.theme.addItem(i18n.t("theme_light"), "light")
-        self.theme.addItem(i18n.t("theme_dark"), "dark")
-        self.theme.addItem(i18n.t("theme_forest"), "forest")
+        for theme_id in theme_ids():
+            label = i18n.t("theme_%s" % theme_id)
+            if label == "theme_%s" % theme_id:
+                label = theme_id
+            self.theme.addItem(label, theme_id)
         tidx = self.theme.findData(store.settings.theme or DEFAULT_THEME)
         self.theme.setCurrentIndex(max(0, tidx))
 
@@ -373,10 +419,23 @@ class MainWindow(QMainWindow):
         self.lbl_code.setObjectName("codeValue")
         self.lbl_verify_title = QLabel()
         self.lbl_verify_title.setObjectName("sideMuted")
+        self.lbl_show_code = QLabel()
+        self.lbl_show_code.setObjectName("sideMuted")
+        self.lbl_show_code.setCursor(PointingHandCursor)
+        self.chk_show = ToggleSwitch()
+        self.chk_show.toggled.connect(self._on_show_code_toggled)
+        # Clicking the text also toggles the switch.
+        self.lbl_show_code.mousePressEvent = (  # type: ignore[method-assign]
+            lambda event: self.chk_show.toggle()
+        )
         self.lbl_verify = QLabel()
         self.lbl_verify.setObjectName("passValue")
-        self.chk_show = QCheckBox()
-        self.chk_show.toggled.connect(self._refresh_local)
+
+        verify_head = QHBoxLayout()
+        verify_head.setSpacing(8)
+        verify_head.addWidget(self.lbl_verify_title, 1)
+        verify_head.addWidget(self.lbl_show_code, 0)
+        verify_head.addWidget(self.chk_show, 0)
 
         port_row = QHBoxLayout()
         self.lbl_port = QLabel()
@@ -398,9 +457,8 @@ class MainWindow(QMainWindow):
         card_l.addWidget(self.lbl_code_hint)
         card_l.addWidget(self.lbl_code)
         card_l.addSpacing(6)
-        card_l.addWidget(self.lbl_verify_title)
+        card_l.addLayout(verify_head)
         card_l.addWidget(self.lbl_verify)
-        card_l.addWidget(self.chk_show)
         card_l.addSpacing(4)
         card_l.addLayout(port_row)
         card_l.addWidget(self.lbl_ips_title)
@@ -538,7 +596,7 @@ class MainWindow(QMainWindow):
         self.lbl_side_hint.setText(i18n.t("local_control_hint"))
         self.lbl_code_hint.setText(i18n.t("device_code"))
         self.lbl_verify_title.setText(i18n.t("verify_code"))
-        self.chk_show.setText(i18n.t("show"))
+        self._sync_show_code_label()
         self.lbl_port.setText(i18n.t("port"))
         self.lbl_ips_title.setText(i18n.t("local_ip"))
         self.btn_refresh_local.setText(i18n.t("refresh_local"))
@@ -586,6 +644,17 @@ class MainWindow(QMainWindow):
             return f"{digits[:3]} {digits[3:6]} {digits[6:]}"
         return code
 
+    def _sync_show_code_label(self) -> None:
+        if self.chk_show.isChecked():
+            self.lbl_show_code.setText(i18n.t("hide_code"))
+        else:
+            self.lbl_show_code.setText(i18n.t("show_code"))
+
+    def _on_show_code_toggled(self, _checked: bool = False) -> None:
+        self._sync_show_code_label()
+        self._refresh_local()
+        self.chk_show.update()
+
     def _refresh_local(self) -> None:
         s = self.store.settings
         self.lbl_local_name.setText(i18n.t("local_name", name=s.local_name))
@@ -595,6 +664,7 @@ class MainWindow(QMainWindow):
         self.edit_port.setText(str(s.host_port))
         ips = list_local_ipv4()
         self.lbl_ips.setText("\n".join(ips))
+        self._sync_show_code_label()
 
     def _filtered_devices(self) -> list[Device]:
         keyword = self.search.text().strip().lower()
@@ -901,6 +971,44 @@ class MainWindow(QMainWindow):
             self._reload_devices()
         self._launch_client(host.strip(), port, password, host.strip(), device_id)
 
+    def _find_viewer(
+        self,
+        host: str,
+        port: int,
+        device_id: str | None,
+    ) -> RemoteClientWindow | None:
+        host_key = host.strip().lower()
+        port_key = int(port)
+        for win in list(self._viewers):
+            try:
+                win_host = str(win.config.net.host).strip().lower()
+                win_port = int(win.config.net.port)
+                win_id = getattr(win, "device_id", None)
+            except RuntimeError:
+                # C++ object already deleted.
+                if win in self._viewers:
+                    self._viewers.remove(win)
+                continue
+            if device_id and win_id and win_id == device_id:
+                return win
+            if win_host == host_key and win_port == port_key:
+                return win
+        return None
+
+    def _focus_viewer(self, win: RemoteClientWindow, title: str) -> None:
+        try:
+            if win.isMinimized():
+                win.showNormal()
+            win.show()
+            win.raise_()
+            win.activateWindow()
+            app = QApplication.instance()
+            if app is not None:
+                app.setActiveWindow(win)
+        except RuntimeError:
+            return
+        self._set_status(i18n.t("viewer_focus_existing", title=title))
+
     def _launch_client(
         self,
         host: str,
@@ -909,6 +1017,14 @@ class MainWindow(QMainWindow):
         title: str,
         device_id: str | None,
     ) -> None:
+        existing = self._find_viewer(host, port, device_id)
+        if existing is not None:
+            self._focus_viewer(existing, title)
+            if device_id:
+                self.store.touch_connected(device_id)
+                self._reload_devices()
+            return
+
         stream = StreamConfig(
             max_fps=self.store.settings.max_fps,
             jpeg_quality=self.store.settings.jpeg_quality,
@@ -921,6 +1037,7 @@ class MainWindow(QMainWindow):
             reconnect=True,
         )
         win = RemoteClientWindow(cfg, parent=None)
+        win.device_id = device_id
         win.setAttribute(WA_DeleteOnClose, True)
         self._viewers.append(win)
 
@@ -960,12 +1077,28 @@ class MainWindow(QMainWindow):
         self._set_status(i18n.t("status_updated", online=online_n, total=len(results)))
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if not ask_confirm(
+            self,
+            title=i18n.t("close_main_title"),
+            message=i18n.t("close_main_confirm"),
+            eyebrow=i18n.t("brand"),
+            ok_text=i18n.t("close_action"),
+            cancel_text=i18n.t("keep_open"),
+            danger=True,
+        ):
+            event.ignore()
+            return
+
         self._probe_stop.set()
         self._stop_host_clipboard()
         if self._host is not None:
             self._stop_host()
         for win in list(self._viewers):
-            win.close()
+            try:
+                win.force_close = True
+                win.close()
+            except RuntimeError:
+                pass
         super().closeEvent(event)
 
 

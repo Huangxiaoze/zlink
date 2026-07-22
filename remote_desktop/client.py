@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from . import PROTOCOL_VERSION
 from .clipboard_sync import ClipboardBridge
 from .config import ClientConfig
+from .confirm_dialog import ask_confirm
 from .i18n import i18n
 from .net import Connection, connect_to
 from .protocol import MsgType, ProtocolError, decode_json, unpack_frame_message
@@ -290,6 +291,8 @@ class RemoteClientWindow(QMainWindow):
         self._swallow_esc_up = False
         self._chrome_edge_px = 10
         self._chrome_hover = False
+        # Set by main window when quitting the whole app (skip confirm once).
+        self.force_close = False
 
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
@@ -417,6 +420,19 @@ class RemoteClientWindow(QMainWindow):
         self._bus.status.emit(i18n.t("viewer_connecting"))
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if not self.force_close:
+            title = self._base_title or self.windowTitle()
+            if not ask_confirm(
+                self,
+                title=i18n.t("close_viewer_title"),
+                message=i18n.t("close_viewer_confirm", title=title),
+                eyebrow=i18n.t("brand"),
+                ok_text=i18n.t("close_action"),
+                cancel_text=i18n.t("keep_open"),
+                danger=True,
+            ):
+                event.ignore()
+                return
         self._shutdown()
         super().closeEvent(event)
 
