@@ -28,6 +28,35 @@ def _combo_arrow_url(color: str) -> str:
     return "file:///" + path.resolve().as_posix()
 
 
+def _hex_to_rgb(color: str) -> Tuple[int, int, int]:
+    value = color.lstrip("#")
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
+
+def _rgba(color: str, alpha: float) -> str:
+    r, g, b = _hex_to_rgb(color)
+    a = max(0.0, min(1.0, float(alpha)))
+    return "rgba(%d, %d, %d, %d)" % (r, g, b, int(round(a * 255)))
+
+
+def _shade(color: str, factor: float) -> str:
+    """Darken (factor < 1) or lighten (factor > 1) a #RRGGBB color."""
+    r, g, b = _hex_to_rgb(color)
+    factor = float(factor)
+    if factor < 1.0:
+        r = max(0, min(255, int(round(r * factor))))
+        g = max(0, min(255, int(round(g * factor))))
+        b = max(0, min(255, int(round(b * factor))))
+    else:
+        t = factor - 1.0
+        r = max(0, min(255, int(round(r + (255 - r) * t))))
+        g = max(0, min(255, int(round(g + (255 - g) * t))))
+        b = max(0, min(255, int(round(b + (255 - b) * t))))
+    return "#%02X%02X%02X" % (r, g, b)
+
+
 @dataclass(frozen=True)
 class ThemeColors:
     id: str
@@ -513,6 +542,15 @@ def build_stylesheet(theme_id: str | None = None) -> str:
     c = resolve_theme(theme_id)
     arrow = _combo_arrow_url(c.muted)
     arrow_open = _combo_arrow_url(c.accent)
+    chrome_bg = _rgba(c.side, 0.92)
+    chrome_btn_bg = _rgba(c.ghost_bg, 0.75)
+    chrome_btn_hover = _rgba(c.accent, 0.28)
+    chrome_btn_pressed = _rgba(c.accent, 0.48)
+    chrome_btn_border = _rgba(c.accent, 0.55)
+    btn_pressed = _shade(c.btn_hover, 0.90)
+    primary_pressed = _shade(c.accent_2, 0.82)
+    danger_pressed = _shade(c.danger_hover, 0.85)
+    ghost_pressed = _shade(c.ghost_hover, 0.88)
     return f"""
 QMainWindow, QWidget#root {{
     background: {c.bg};
@@ -699,6 +737,11 @@ QPushButton {{
 QPushButton:hover {{
     background: {c.btn_hover};
 }}
+QPushButton:pressed {{
+    background: {btn_pressed};
+    border-color: {c.accent};
+    padding: 9px 13px 7px 15px;
+}}
 QMenu {{
     background: {c.card};
     color: {c.text};
@@ -730,6 +773,10 @@ QPushButton#primary {{
 QPushButton#primary:hover {{
     background: {c.accent_2};
 }}
+QPushButton#primary:pressed {{
+    background: {primary_pressed};
+    padding: 9px 13px 7px 15px;
+}}
 QPushButton#danger {{
     background: {c.danger};
     color: #FFFFFF;
@@ -739,6 +786,10 @@ QPushButton#danger {{
 QPushButton#danger:hover {{
     background: {c.danger_hover};
 }}
+QPushButton#danger:pressed {{
+    background: {danger_pressed};
+    padding: 9px 13px 7px 15px;
+}}
 QPushButton#ghostDark {{
     background: {c.ghost_bg};
     color: {c.ghost_text};
@@ -746,6 +797,11 @@ QPushButton#ghostDark {{
 }}
 QPushButton#ghostDark:hover {{
     background: {c.ghost_hover};
+}}
+QPushButton#ghostDark:pressed {{
+    background: {ghost_pressed};
+    border-color: {c.accent};
+    padding: 9px 13px 7px 15px;
 }}
 QFrame#deviceCard {{
     background: {c.card_tile};
@@ -836,6 +892,10 @@ QPushButton#dialogClose:hover {{
     background: {c.btn_hover};
     color: {c.text};
 }}
+QPushButton#dialogClose:pressed {{
+    background: {btn_pressed};
+    color: {c.text};
+}}
 QLabel#confirmEyebrow {{
     color: {c.muted};
     font-size: 11px;
@@ -890,6 +950,11 @@ QPushButton#confirmCancel {{
 QPushButton#confirmCancel:hover {{
     background: {c.btn_hover};
 }}
+QPushButton#confirmCancel:pressed {{
+    background: {btn_pressed};
+    border-color: {c.accent};
+    padding: 10px 17px 8px 19px;
+}}
 QPushButton#confirmOk {{
     background: {c.accent};
     color: #FFFFFF;
@@ -902,10 +967,43 @@ QPushButton#confirmOk {{
 QPushButton#confirmOk:hover {{
     background: {c.accent_2};
 }}
+QPushButton#confirmOk:pressed {{
+    background: {primary_pressed};
+    padding: 10px 17px 8px 19px;
+}}
 QPushButton#confirmOk[danger="true"] {{
     background: {c.danger};
 }}
 QPushButton#confirmOk[danger="true"]:hover {{
     background: {c.danger_hover};
+}}
+QPushButton#confirmOk[danger="true"]:pressed {{
+    background: {danger_pressed};
+}}
+QFrame#viewerChromeBar {{
+    background: {chrome_bg};
+    border: none;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}}
+QPushButton#viewerChromeBtn {{
+    color: {c.side_text};
+    background: {chrome_btn_bg};
+    border: 1px solid {chrome_btn_border};
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QPushButton#viewerChromeBtn:hover {{
+    background: {chrome_btn_hover};
+    color: #FFFFFF;
+    border-color: {c.accent};
+}}
+QPushButton#viewerChromeBtn:pressed {{
+    background: {chrome_btn_pressed};
+    color: #FFFFFF;
+    border-color: {c.accent};
+    padding: 7px 13px 5px 15px;
 }}
 """

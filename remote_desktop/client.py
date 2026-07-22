@@ -33,6 +33,7 @@ from .qt_bind import (
     MouseFocusReason,
     NoFocus,
     PointingHandCursor,
+    WA_StyledBackground,
     QApplication,
     QFrame,
     QHBoxLayout,
@@ -240,27 +241,14 @@ class ViewerChromeBar(QFrame):
         super().__init__(parent)
         self._on_hover = on_hover
         self.setObjectName("viewerChromeBar")
-        self.setStyleSheet(
-            "#viewerChromeBar {"
-            "  background: rgba(15, 22, 30, 235);"
-            "  border: none;"
-            "  border-bottom-left-radius: 10px;"
-            "  border-bottom-right-radius: 10px;"
-            "}"
-            "#viewerChromeBar QPushButton {"
-            "  color: #E8FFF4; background: rgba(255,255,255,18);"
-            "  border: 1px solid rgba(125,255,206,120); border-radius: 6px;"
-            "  padding: 6px 14px; font-size: 12px; font-weight: 600;"
-            "}"
-            "#viewerChromeBar QPushButton:hover {"
-            "  background: rgba(125,255,206,40); color: #FFFFFF;"
-            "}"
-        )
+        # Colors come from the app stylesheet (themes.py) so settings theme changes apply.
+        self.setAttribute(WA_StyledBackground, True)
         lay = QHBoxLayout(self)
         # Keep the action near the window caption buttons (minimize/close).
         lay.setContentsMargins(12, 8, 18, 10)
         lay.addStretch(1)
         self.btn_action = QPushButton(i18n.t("viewer_fullscreen"))
+        self.btn_action.setObjectName("viewerChromeBtn")
         self.btn_action.setCursor(PointingHandCursor)
         self.btn_action.setFocusPolicy(NoFocus)
         self.btn_action.clicked.connect(on_toggle)
