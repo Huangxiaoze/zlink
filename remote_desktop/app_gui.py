@@ -22,7 +22,6 @@ from .qt_bind import (
     QApplication,
     QComboBox,
     QDialog,
-    QFileDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -553,21 +552,12 @@ class MainWindow(QMainWindow):
         row_side_btns.addWidget(self.btn_refresh_local)
         row_side_btns.addWidget(self.btn_regen)
 
-        # Only shown while a controller is connected to this host.
-        self.btn_send_to_controller = QPushButton()
-        self.btn_send_to_controller.setObjectName("primary")
-        self.btn_send_to_controller.setCursor(PointingHandCursor)
-        self.btn_send_to_controller.setMinimumHeight(36)
-        self.btn_send_to_controller.setVisible(False)
-        self.btn_send_to_controller.clicked.connect(self._pick_and_send_file_to_controller)
-
         self.lbl_host_state = QLabel()
         self.lbl_host_state.setObjectName("hostWarn")
         self.lbl_host_state.setWordWrap(True)
 
         act_l.addWidget(self.btn_host)
         act_l.addLayout(row_side_btns)
-        act_l.addWidget(self.btn_send_to_controller)
         act_l.addWidget(self.lbl_host_state)
 
         side_l.addWidget(side_scroll, 1)
@@ -676,8 +666,6 @@ class MainWindow(QMainWindow):
         self.lbl_ips_title.setText(i18n.t("local_ip"))
         self.btn_refresh_local.setText(i18n.t("refresh_local"))
         self.btn_regen.setText(i18n.t("regen_code"))
-        self.btn_send_to_controller.setText(i18n.t("send_to_controller"))
-        self._refresh_send_to_controller_button()
         if self._host is None:
             self.btn_host.setText(i18n.t("start_host"))
             self._restyle(self.btn_host, "primary")
@@ -977,7 +965,6 @@ class MainWindow(QMainWindow):
         self.lbl_host_state.setText(i18n.t("host_on", port=DEFAULT_PORT))
         self._restyle(self.lbl_host_state, "hostOk")
         self._set_status(i18n.t("host_started", port=DEFAULT_PORT))
-        self._refresh_send_to_controller_button()
 
     def _enqueue_host_clipboard(self, packet: bytes) -> None:
         host = self._host
@@ -1061,7 +1048,6 @@ class MainWindow(QMainWindow):
 
     def _on_host_file_tick(self) -> None:
         self._drain_host_file_in()
-        self._refresh_send_to_controller_button()
 
     def _drain_host_file_in(self) -> None:
         host = self._host
@@ -1137,7 +1123,6 @@ class MainWindow(QMainWindow):
 
         self._file_sending = True
         self._file_send_stop.clear()
-        self._refresh_send_to_controller_button()
         self._set_status(i18n.t("file_sending", name=src.name, pct=0))
 
         def worker() -> None:
@@ -1166,7 +1151,6 @@ class MainWindow(QMainWindow):
                 self.file_status.emit(i18n.t("file_transfer_failed", error=str(exc)))
             finally:
                 self._file_sending = False
-                QTimer.singleShot(0, self._refresh_send_to_controller_button)
 
         threading.Thread(target=worker, name="host-remote-download", daemon=True).start()
 
@@ -1180,75 +1164,6 @@ class MainWindow(QMainWindow):
         if self._host_files is not None:
             self._host_files.clear()
             self._host_files = None
-        self._refresh_send_to_controller_button()
-
-    def _host_session_live(self) -> bool:
-        return self._host is not None and self._host.session_live.is_set()
-
-    def _refresh_send_to_controller_button(self) -> None:
-        """Show host→controller send only while a remote controller is connected."""
-        live = self._host_session_live()
-        busy = self._file_sending
-        self.btn_send_to_controller.setVisible(live)
-        self.btn_send_to_controller.setEnabled(live and not busy)
-        self.btn_send_to_controller.setToolTip(
-            i18n.t("send_to_controller_hint") if live else ""
-        )
-
-    def _pick_and_send_file_to_controller(self) -> None:
-        if not self._host_session_live():
-            show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_no_session"))
-            return
-        if self._file_sending:
-            show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_busy"))
-            return
-
-        path, _filter = QFileDialog.getOpenFileName(
-            self, i18n.t("send_file_pick"), str(Path.home())
-        )
-        if not path:
-            return
-        src = Path(path)
-        if not src.is_file():
-            return
-        if src.stat().st_size > MAX_FILE_BYTES:
-            show_warning(
-                self,
-                title=i18n.t("tip"),
-                message=i18n.t("file_too_large", name=src.name),
-            )
-            return
-
-        self._file_sending = True
-        self._file_send_stop.clear()
-        self._refresh_send_to_controller_button()
-        self._set_status(i18n.t("file_sending", name=src.name, pct=0))
-
-        def worker() -> None:
-            try:
-                send_file(
-                    src,
-                    self._enqueue_host_file,
-                    on_progress=lambda name, done, total: self.file_status.emit(
-                        i18n.t(
-                            "file_sending",
-                            name=name,
-                            pct=(100 if total <= 0 else min(100, int(done * 100 / total))),
-                        )
-                    ),
-                    should_stop=lambda: self._file_send_stop.is_set(),
-                )
-                self.file_status.emit(i18n.t("file_sent", name=src.name))
-            except InterruptedError:
-                self.file_status.emit(i18n.t("file_transfer_failed", error="cancelled"))
-            except Exception as exc:
-                log.exception("host send file failed")
-                self.file_status.emit(i18n.t("file_transfer_failed", error=str(exc)))
-            finally:
-                self._file_sending = False
-                QTimer.singleShot(0, self._refresh_send_to_controller_button)
-
-        threading.Thread(target=worker, name="host-file-send", daemon=True).start()
 
     def _stop_host(self) -> None:
         self._stop_host_clipboard()
@@ -1262,7 +1177,6 @@ class MainWindow(QMainWindow):
         self.lbl_host_state.setText(i18n.t("host_off"))
         self._restyle(self.lbl_host_state, "hostWarn")
         self._set_status(i18n.t("host_stopped"))
-        self._refresh_send_to_controller_button()
 
     def _on_host_crashed(self) -> None:
         self._stop_host_clipboard()
@@ -1272,7 +1186,6 @@ class MainWindow(QMainWindow):
         self._restyle(self.btn_host, "primary")
         self.lbl_host_state.setText(i18n.t("host_crashed"))
         self._restyle(self.lbl_host_state, "hostDanger")
-        self._refresh_send_to_controller_button()
         show_error(self, title=i18n.t("error"), message=i18n.t("host_crash_msg"))
 
     def _quick_connect(self) -> None:
