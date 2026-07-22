@@ -64,6 +64,7 @@ class AppSettings:
     jpeg_quality: int = 60
     scale: float = 0.75
     auto_probe_s: float = 8.0
+    language: str = "zh_CN"
 
 
 class DeviceStore:
@@ -86,6 +87,9 @@ class DeviceStore:
         except (OSError, json.JSONDecodeError):
             raw = {}
         settings = raw.get("settings") or {}
+        lang = str(settings.get("language") or "zh_CN")
+        if lang not in {"zh_CN", "en_US"}:
+            lang = "zh_CN"
         self.settings = AppSettings(
             host_bind=str(settings.get("host_bind", "0.0.0.0")),
             host_port=int(settings.get("host_port", 5959)),
@@ -96,6 +100,7 @@ class DeviceStore:
             jpeg_quality=int(settings.get("jpeg_quality", 60)),
             scale=float(settings.get("scale", 0.75)),
             auto_probe_s=float(settings.get("auto_probe_s", 8.0)),
+            language=lang,
         )
         if not self.settings.host_password:
             self.settings.host_password = _make_verify_code()

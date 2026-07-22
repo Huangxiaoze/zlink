@@ -8,8 +8,9 @@
 
 - 用 **Python 3.10+** 实现跨平台远程桌面（Linux / Windows / macOS）
 - 角色分离：**Host（被控端）** 抓屏并注入输入；**Client（主控端）** 显示画面并采集键鼠
-- 提供 **向日葵风格设备管理 GUI**：本机远控开关、设备列表 CRUD、在线探测、一键远程控制
-- 优先保证 **流畅性**（低延迟、可丢帧）与 **稳定性**（心跳、超时、优雅断开、客户端重连）
+- 提供 **向日葵风格设备管理 GUI（PySide6/Qt）**：本机远控开关、设备列表 CRUD、在线探测、一键远程控制
+- **中英文切换**；Ubuntu 下通过 CJK 字体回退解决中文乱码
+- 优先保证 **流畅性**（低延迟、可丢帧、远程画面防闪烁）与 **稳定性**（心跳、超时、优雅断开、客户端重连）
 - 直连 TCP 模式（Host 监听，Client 连接）；不实现向日葵式公网中继 / NAT 穿透（可后续扩展）
 
 ### 非目标（当前阶段不做）
@@ -58,20 +59,31 @@ Client: input events → TCP send → Host inject
 | 截屏 | `mss` | Win/macOS/Linux(X11) 表现稳定 |
 | 图像 | `Pillow` | JPEG 编解码 |
 | 键鼠注入/采集 | `pynput` | 需系统辅助权限（见 README） |
-| 主控显示 | `pygame` | 固定帧呈现、键鼠事件统一 |
-| 管理界面 | `tkinter`（标准库） | 设备管理主窗口，零额外 GUI 依赖 |
+| 管理界面 / 远程画面 | `PySide6` | 统一 Qt 事件循环；远程窗口与管理窗口同进程 |
+| 中英文 | `i18n.py` | 运行时可切换，写入 `settings.language` |
+| CJK 字体 | `qt_fonts.py` | `QFont.setFamilies` 回退链，优先 Noto/文泉驿/雅黑 |
 
 ### 2.5 GUI 架构决策
 
 ```text
-tkinter 主进程（设备管理）
-  ├─ 后台线程：RemoteHost（本机被控）
-  ├─ 后台线程：TCP 端口探测（在线/离线）
-  └─ subprocess：python main.py client ...（远程画面窗口）
+QApplication
+  ├─ MainWindow（设备管理）
+  │    ├─ 后台线程：RemoteHost
+  │    └─ 后台线程：在线探测
+  └─ RemoteClientWindow（远程画面，可多开）
+       ├─ 网络线程：收帧 / 心跳
+       └─ QTimer(~16ms)：合并最新 JPEG 后上屏（防闪烁）
 ```
 
-- **Client 必须独立进程**：`tkinter` 与 `pygame` 都倾向占用主线程/事件循环，同进程易卡死或抢焦点
-- 设备与设置持久化到用户配置目录（非仓库内）：
+- **同进程多窗口**：管理端与控制端都用 Qt，避免 tk/pygame 双事件循环
+- **防闪烁要点**（改动时勿破坏）：
+  1. 网络线程只保留最新帧，旧帧丢弃
+  2. GUI 用 `QTimer` 合帧，不要每包立刻 `repaint`
+  3. `RemoteCanvas` 使用 `WA_OpaquePaintEvent`，在同一次 `paintEvent` 内绘制，避免先清黑再异步贴图
+  4. 缩放结果按窗口尺寸缓存，窗口未变不重复 `scaled()`
+  5. 用 `QImage.fromData(..., "JPEG")`，不要 PIL→原始 buffer→pygame 这条易闪路径
+- **中文乱码**：不依赖系统默认 Latin 字体；启动时 `apply_app_font()`。Ubuntu 建议安装 `fonts-noto-cjk`
+- 设备与设置持久化到用户配置目录（含 `language`）：
   - Windows: `%APPDATA%/remote_desktop/devices.json`
   - macOS: `~/Library/Application Support/remote_desktop/devices.json`
   - Linux: `~/.config/remote_desktop/devices.json`
@@ -82,6 +94,7 @@ tkinter 主进程（设备管理）
 
 - **macOS**：屏幕录制 + 辅助功能权限
 - **Linux Wayland**：`mss`/`pynput` 可能受限，优先 X11 或文档标明限制
+- **Ubuntu 中文**：`sudo apt install fonts-noto-cjk`（或 `fonts-wqy-microhei`）
 - **Windows**：部分全屏游戏/管理员窗口注入可能失败，属 OS 安全策略
 
 ## 3. 目录结构
@@ -104,7 +117,10 @@ remote/
     host.py                 # 被控端
     client.py               # 主控端
     devices.py              # 设备列表 / 本机设置持久化
-    app_gui.py              # 向日葵风格管理界面
+    i18n.py                 # 中英文文案
+    qt_fonts.py             # CJK 字体选择
+    app_gui.py              # Qt 设备管理界面
+    client.py               # Qt 远程画面（防闪烁）
 ```
 
 ## 4. 协议规范
@@ -185,6 +201,8 @@ magic = b"RD01"
 3. 拔网线或杀 Client 后 Host 回到监听，不崩溃
 4. 降低带宽时画面质量下降但操作仍可跟手（丢帧而非卡死）
 5. GUI：添加/编辑/删除设备可持久化；开启本机远控后列表可探测在线；双击可打开控制窗口
+6. 远程画面连续移动窗口内容时无明显黑闪；设置中切换中英文后主界面文案立即更新
+7. Ubuntu 安装 Noto CJK 后中文不再方框/乱码
 
 ## 6. 性能参数默认值
 
@@ -205,4 +223,5 @@ magic = b"RD01"
 2. 改动流畅性相关逻辑时，说明对“丢帧 / 延迟 / CPU”的影响
 3. 不主动扩展文件传输、中继服务器等大功能，除非用户明确要求
 4. 用户可见说明更新 `README.md`；设计规范更新本文件
-5. GUI 变更保持 `tkinter` 单依赖策略；不要把 pygame 事件塞进管理窗口主循环
+5. GUI 统一 PySide6；禁止再引入 tkinter/pygame 作为主界面或远程画面渲染路径
+6. 新增可见文案必须同时写入 `i18n.py` 的 `zh_CN` 与 `en_US`
