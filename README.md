@@ -73,7 +73,7 @@ python main.py client --host <IP> --password <code>
 
 主题：设置 → 主题（浅色 / 深色 / 森绿），立即生效并写入本地配置。
 
-## 打包可执行文件
+## 打包可执行文件 / Windows 安装包
 
 在**目标平台本机**打包（PyInstaller 交叉编译 Qt 应用不可靠）：
 
@@ -83,14 +83,43 @@ python main.py client --host <IP> --password <code>
 | Linux | `bash scripts/build_linux.sh` |
 | macOS | `bash scripts/build_macos.sh` |
 
-或统一入口：
+### Windows 安装包（推荐）
+
+默认会生成：
+
+1. 应用目录：`dist/LeafLink/LeafLink.exe`
+2. 安装包：`dist/LeafLink-Setup-<version>.exe`（Inno Setup）
+
+```powershell
+# 若尚未安装 Inno Setup 6，可让脚本自动安装：
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -InstallInnoSetup
+
+# 或先手动安装：
+winget install --id JRSoftware.InnoSetup -e
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+```
+
+只要应用目录、不要安装包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -NoInstaller
+```
+
+单文件便携版（启动较慢，不含安装向导）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -NoInstaller -OneFile
+```
+
+### 通用入口
 
 ```bash
 pip install -r requirements.txt -r requirements-build.txt
 python scripts/build.py --clean
+# Windows 安装包：
+python scripts/build.py --clean --installer
 ```
 
-产物在 `dist/LeafLink/`（Windows 为 `LeafLink.exe`）。  
 调试 CLI 可加 `--console` 保留终端窗口。
 
 ## 与主分支差异
