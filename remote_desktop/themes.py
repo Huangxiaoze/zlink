@@ -627,6 +627,17 @@ QLabel#hostDanger {{
 QFrame#side {{
     background: {c.side};
 }}
+QScrollArea#sideScroll, QScrollArea#sideScroll > QWidget > QWidget {{
+    background: {c.side};
+    border: none;
+}}
+QWidget#sideTop {{
+    background: {c.side};
+}}
+QFrame#sideActions {{
+    background: {c.side_2};
+    border-top: 1px solid {c.side_line};
+}}
 QFrame#infoCard {{
     background: {c.side_2};
     border: 1px solid {c.side_line};

@@ -419,8 +419,19 @@ class MainWindow(QMainWindow):
         side.setMinimumWidth(300)
         side.setMaximumWidth(360)
         side_l = QVBoxLayout(side)
-        side_l.setContentsMargins(22, 24, 22, 22)
-        side_l.setSpacing(10)
+        side_l.setContentsMargins(0, 0, 0, 0)
+        side_l.setSpacing(0)
+
+        # Upper info can scroll; action buttons stay pinned at the bottom.
+        side_scroll = QScrollArea()
+        side_scroll.setObjectName("sideScroll")
+        side_scroll.setWidgetResizable(True)
+        side_scroll.setFrameShape(getattr(getattr(QFrame, "Shape", QFrame), "NoFrame", 0))
+        side_top = QWidget()
+        side_top.setObjectName("sideTop")
+        top_l = QVBoxLayout(side_top)
+        top_l.setContentsMargins(22, 24, 22, 12)
+        top_l.setSpacing(10)
 
         self.lbl_brand = QLabel()
         self.lbl_brand.setObjectName("brand")
@@ -482,6 +493,21 @@ class MainWindow(QMainWindow):
         card_l.addWidget(self.lbl_ips_title)
         card_l.addWidget(self.lbl_ips)
 
+        top_l.addWidget(self.lbl_brand)
+        top_l.addWidget(self.lbl_brand_tag)
+        top_l.addSpacing(14)
+        top_l.addWidget(self.lbl_side_title)
+        top_l.addWidget(self.lbl_side_hint)
+        top_l.addWidget(card)
+        top_l.addStretch(1)
+        side_scroll.setWidget(side_top)
+
+        actions = QFrame()
+        actions.setObjectName("sideActions")
+        act_l = QVBoxLayout(actions)
+        act_l.setContentsMargins(22, 12, 22, 22)
+        act_l.setSpacing(10)
+
         self.btn_host = QPushButton()
         self.btn_host.setObjectName("primary")
         self.btn_host.setCursor(PointingHandCursor)
@@ -501,24 +527,20 @@ class MainWindow(QMainWindow):
         self.btn_send_file = QPushButton()
         self.btn_send_file.setObjectName("ghostDark")
         self.btn_send_file.setCursor(PointingHandCursor)
-        self.btn_send_file.setEnabled(False)
+        self.btn_send_file.setMinimumHeight(36)
         self.btn_send_file.clicked.connect(self._pick_and_send_file_to_client)
 
         self.lbl_host_state = QLabel()
         self.lbl_host_state.setObjectName("hostWarn")
+        self.lbl_host_state.setWordWrap(True)
 
-        side_l.addWidget(self.lbl_brand)
-        side_l.addWidget(self.lbl_brand_tag)
-        side_l.addSpacing(14)
-        side_l.addWidget(self.lbl_side_title)
-        side_l.addWidget(self.lbl_side_hint)
-        side_l.addWidget(card)
-        side_l.addSpacing(8)
-        side_l.addWidget(self.btn_host)
-        side_l.addLayout(row_side_btns)
-        side_l.addWidget(self.btn_send_file)
-        side_l.addWidget(self.lbl_host_state)
-        side_l.addStretch(1)
+        act_l.addWidget(self.btn_host)
+        act_l.addLayout(row_side_btns)
+        act_l.addWidget(self.btn_send_file)
+        act_l.addWidget(self.lbl_host_state)
+
+        side_l.addWidget(side_scroll, 1)
+        side_l.addWidget(actions, 0)
 
         main = QWidget()
         main_l = QVBoxLayout(main)
@@ -1036,7 +1058,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_send_file_button(self) -> None:
         live = self._host is not None and self._host.session_live.is_set()
-        self.btn_send_file.setEnabled(bool(live) and not self._file_sending)
+        busy = self._file_sending
+        # Keep the button always clickable/visible; warn on click if no session.
+        self.btn_send_file.setEnabled(not busy)
+        self.btn_send_file.setToolTip(
+            i18n.t("file_transfer_no_session") if not live else ""
+        )
+        want_name = "primary" if live and not busy else "ghostDark"
+        if self.btn_send_file.objectName() != want_name:
+            self._restyle(self.btn_send_file, want_name)
 
     def _pick_and_send_file_to_client(self) -> None:
         if self._host is None or not self._host.session_live.is_set():
