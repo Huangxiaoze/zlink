@@ -5,12 +5,13 @@ from dataclasses import dataclass
 
 @dataclass
 class StreamConfig:
+    # HD defaults: full resolution + high JPEG quality for sharp remote view.
     max_fps: float = 30.0
-    jpeg_quality: int = 60
-    scale: float = 0.75
-    min_jpeg_quality: int = 30
-    max_jpeg_quality: int = 85
-    min_scale: float = 0.4
+    jpeg_quality: int = 90
+    scale: float = 1.0
+    min_jpeg_quality: int = 55
+    max_jpeg_quality: int = 95
+    min_scale: float = 0.6
     max_scale: float = 1.0
 
     def clamp(self) -> StreamConfig:

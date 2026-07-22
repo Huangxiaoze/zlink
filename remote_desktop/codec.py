@@ -30,14 +30,22 @@ def encode_bgra(
     if scale < 0.999:
         dst_w = max(1, int(src_width * scale))
         dst_h = max(1, int(src_height * scale))
-        # Pillow 9: Image.BILINEAR; Pillow 10+: Image.Resampling.BILINEAR
-        resample = getattr(getattr(Image, "Resampling", Image), "BILINEAR", Image.BILINEAR)
+        # LANCZOS keeps text/UI edges sharper when downscaling.
+        resampling = getattr(Image, "Resampling", Image)
+        resample = getattr(resampling, "LANCZOS", getattr(Image, "LANCZOS", Image.BICUBIC))
         image = image.resize((dst_w, dst_h), resample)
     else:
         dst_w, dst_h = src_width, src_height
 
     buf = io.BytesIO()
-    image.save(buf, format="JPEG", quality=int(quality), optimize=False)
+    # subsampling=0 => 4:4:4, much clearer for text than default 4:2:0.
+    image.save(
+        buf,
+        format="JPEG",
+        quality=int(quality),
+        optimize=False,
+        subsampling=0,
+    )
     return EncodedFrame(
         jpeg=buf.getvalue(),
         width=dst_w,

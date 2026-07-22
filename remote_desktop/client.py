@@ -10,6 +10,7 @@ from .i18n import i18n
 from .net import Connection, connect_to
 from .protocol import MsgType, ProtocolError, decode_json, unpack_frame_message
 from .qt_bind import (
+    FastTransformation,
     Format_RGB32,
     KeepAspectRatio,
     MiddleButton,
@@ -79,14 +80,25 @@ class RemoteCanvas(QWidget):
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(SmoothPixmapTransform, True)
         w, h = self.width(), self.height()
         if self._source.isNull():
             painter.fillRect(self.rect(), black)
             return
 
+        src_w, src_h = self._source.width(), self._source.height()
         if self._scaled.isNull() or self._scaled_for != (w, h):
-            self._scaled = self._source.scaled(w, h, KeepAspectRatio, SmoothTransformation)
+            scale = min(float(w) / max(1, src_w), float(h) / max(1, src_h))
+            tw = max(1, int(src_w * scale))
+            th = max(1, int(src_h * scale))
+            if tw == src_w and th == src_h:
+                self._scaled = self._source
+            elif scale < 1.0:
+                # Downscale smoothly for anti-aliasing.
+                painter.setRenderHint(SmoothPixmapTransform, True)
+                self._scaled = self._source.scaled(tw, th, KeepAspectRatio, SmoothTransformation)
+            else:
+                # Upscale with nearest-neighbor to keep UI text crisp.
+                self._scaled = self._source.scaled(tw, th, KeepAspectRatio, FastTransformation)
             self._scaled_for = (w, h)
 
         sw, sh = self._scaled.width(), self._scaled.height()

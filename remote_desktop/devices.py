@@ -61,10 +61,12 @@ class AppSettings:
     local_name: str = ""
     device_code: str = ""
     max_fps: float = 30.0
-    jpeg_quality: int = 60
-    scale: float = 0.75
+    jpeg_quality: int = 90
+    scale: float = 1.0
     auto_probe_s: float = 8.0
     language: str = "zh_CN"
+    # Bump when default stream quality changes so old installs get upgraded once.
+    settings_version: int = 2
 
 
 class DeviceStore:
@@ -90,6 +92,14 @@ class DeviceStore:
         lang = str(settings.get("language") or "zh_CN")
         if lang not in {"zh_CN", "en_US"}:
             lang = "zh_CN"
+        version = int(settings.get("settings_version") or 0)
+        jpeg_quality = int(settings.get("jpeg_quality", 90))
+        scale = float(settings.get("scale", 1.0))
+        # Migrate old soft defaults (0.75 / q60) to HD once.
+        if version < 2 and jpeg_quality <= 70 and scale <= 0.85:
+            jpeg_quality = 90
+            scale = 1.0
+            version = 2
         self.settings = AppSettings(
             host_bind=str(settings.get("host_bind", "0.0.0.0")),
             host_port=int(settings.get("host_port", 5959)),
@@ -97,13 +107,16 @@ class DeviceStore:
             local_name=str(settings.get("local_name") or socket.gethostname()),
             device_code=str(settings.get("device_code") or _make_device_code()),
             max_fps=float(settings.get("max_fps", 30.0)),
-            jpeg_quality=int(settings.get("jpeg_quality", 60)),
-            scale=float(settings.get("scale", 0.75)),
+            jpeg_quality=jpeg_quality,
+            scale=scale,
             auto_probe_s=float(settings.get("auto_probe_s", 8.0)),
             language=lang,
+            settings_version=max(version, 2),
         )
         if not self.settings.host_password:
             self.settings.host_password = _make_verify_code()
+        if int(settings.get("settings_version") or 0) < 2:
+            self.save()
         self.devices = []
         for item in raw.get("devices") or []:
             try:

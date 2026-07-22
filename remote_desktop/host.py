@@ -175,27 +175,37 @@ class RemoteHost:
                 session_stop.set()
                 break
 
-            # Simple congestion hint: if encode keeps producing faster than we send,
-            # lower quality gradually; recover slowly when healthy.
+            # Congestion control: prefer lowering JPEG quality before resolution,
+            # and recover back toward full HD (scale=1.0 / high quality).
             now = time.monotonic()
-            if now - last_adapt > 1.0:
+            if now - last_adapt > 1.2:
                 last_adapt = now
-                if pending_bytes > 200_000 and self.stream.jpeg_quality > self.stream.min_jpeg_quality:
-                    self._apply_quality(
-                        {
-                            "max_fps": self.stream.max_fps,
-                            "jpeg_quality": self.stream.jpeg_quality - 5,
-                            "scale": max(self.stream.min_scale, self.stream.scale - 0.05),
-                        }
-                    )
-                elif pending_bytes < 80_000 and self.stream.jpeg_quality < 60:
-                    self._apply_quality(
-                        {
-                            "max_fps": self.stream.max_fps,
-                            "jpeg_quality": self.stream.jpeg_quality + 3,
-                            "scale": min(0.75, self.stream.scale + 0.02),
-                        }
-                    )
+                target_q = self.config.stream.jpeg_quality
+                target_scale = self.config.stream.scale
+                if pending_bytes > 350_000:
+                    next_q = max(self.stream.min_jpeg_quality, self.stream.jpeg_quality - 4)
+                    next_scale = self.stream.scale
+                    if self.stream.jpeg_quality <= self.stream.min_jpeg_quality + 2:
+                        next_scale = max(self.stream.min_scale, self.stream.scale - 0.05)
+                    if next_q != self.stream.jpeg_quality or next_scale != self.stream.scale:
+                        self._apply_quality(
+                            {
+                                "max_fps": self.stream.max_fps,
+                                "jpeg_quality": next_q,
+                                "scale": next_scale,
+                            }
+                        )
+                elif pending_bytes < 120_000:
+                    next_q = min(target_q, self.stream.jpeg_quality + 4)
+                    next_scale = min(target_scale, self.stream.scale + 0.05)
+                    if next_q != self.stream.jpeg_quality or next_scale != self.stream.scale:
+                        self._apply_quality(
+                            {
+                                "max_fps": self.stream.max_fps,
+                                "jpeg_quality": next_q,
+                                "scale": next_scale,
+                            }
+                        )
 
             # Heartbeat from sender path as well
             if (now - conn.last_tx) >= self.config.net.heartbeat_interval_s:

@@ -55,10 +55,167 @@ from .qt_fonts import apply_app_font, ensure_utf8_stdio
 
 log = logging.getLogger(__name__)
 
-SIDE_BG = "#1F2A30"
-ACCENT = "#2F9E5E"
-ACCENT_DARK = "#247A49"
-DANGER = "#C24B4B"
+# Slate + teal — remote-tool look, not purple / cream defaults.
+C_BG = "#EEF2F4"
+C_SIDE = "#0F1C24"
+C_SIDE_2 = "#162832"
+C_CARD = "#FFFFFF"
+C_TEXT = "#14212B"
+C_MUTED = "#6A7A86"
+C_LINE = "#D5DEE5"
+C_ACCENT = "#0F9D7A"
+C_ACCENT_2 = "#0B7F63"
+C_DANGER = "#D64545"
+C_WARN = "#E3A008"
+C_ONLINE = "#0B8F5B"
+C_OFFLINE = "#C0392B"
+
+APP_QSS = f"""
+QMainWindow, QWidget#root {{
+    background: {C_BG};
+    color: {C_TEXT};
+}}
+QLabel#brand {{
+    color: #FFFFFF;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}}
+QLabel#brandTag {{
+    color: #8FA3B0;
+    font-size: 11px;
+}}
+QLabel#sectionTitle {{
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 700;
+}}
+QLabel#muted {{
+    color: #8FA3B0;
+    font-size: 12px;
+}}
+QLabel#codeValue {{
+    color: #FFFFFF;
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}}
+QLabel#passValue {{
+    color: #7DFFCE;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 2px;
+}}
+QLabel#pageTitle {{
+    color: {C_TEXT};
+    font-size: 22px;
+    font-weight: 800;
+}}
+QLabel#pageSub {{
+    color: {C_MUTED};
+    font-size: 12px;
+}}
+QFrame#side {{
+    background: {C_SIDE};
+}}
+QFrame#infoCard {{
+    background: {C_SIDE_2};
+    border: 1px solid #243845;
+    border-radius: 12px;
+}}
+QFrame#mainCard {{
+    background: {C_CARD};
+    border: 1px solid {C_LINE};
+    border-radius: 14px;
+}}
+QLineEdit, QComboBox {{
+    background: #FFFFFF;
+    border: 1px solid {C_LINE};
+    border-radius: 8px;
+    padding: 8px 10px;
+    min-height: 18px;
+    selection-background-color: {C_ACCENT};
+}}
+QFrame#side QLineEdit {{
+    background: #0C171E;
+    color: #E8F1F5;
+    border: 1px solid #2A3D4A;
+}}
+QFrame#side QCheckBox {{
+    color: #9BB0BD;
+    spacing: 8px;
+}}
+QPushButton {{
+    background: #F4F7F9;
+    color: {C_TEXT};
+    border: 1px solid {C_LINE};
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-weight: 600;
+}}
+QPushButton:hover {{
+    background: #E8EEF2;
+}}
+QPushButton#primary {{
+    background: {C_ACCENT};
+    color: white;
+    border: none;
+    font-weight: 700;
+}}
+QPushButton#primary:hover {{
+    background: {C_ACCENT_2};
+}}
+QPushButton#danger {{
+    background: {C_DANGER};
+    color: white;
+    border: none;
+    font-weight: 700;
+}}
+QPushButton#danger:hover {{
+    background: #B93737;
+}}
+QPushButton#ghostDark {{
+    background: #21313B;
+    color: #E7F0F5;
+    border: 1px solid #314552;
+}}
+QPushButton#ghostDark:hover {{
+    background: #2A3E4A;
+}}
+QTableWidget {{
+    background: transparent;
+    border: none;
+    gridline-color: transparent;
+    outline: none;
+    font-size: 13px;
+}}
+QTableWidget::item {{
+    padding: 10px 8px;
+    border-bottom: 1px solid #EEF2F5;
+}}
+QTableWidget::item:selected {{
+    background: #E6F7F2;
+    color: {C_TEXT};
+}}
+QHeaderView::section {{
+    background: transparent;
+    color: {C_MUTED};
+    border: none;
+    border-bottom: 1px solid {C_LINE};
+    padding: 10px 8px;
+    font-weight: 700;
+}}
+QScrollBar:vertical {{
+    background: transparent;
+    width: 10px;
+    margin: 4px 2px;
+}}
+QScrollBar::handle:vertical {{
+    background: #C5D0D8;
+    border-radius: 4px;
+    min-height: 30px;
+}}
+"""
 
 
 class DeviceDialog(QDialog):
@@ -66,10 +223,13 @@ class DeviceDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
+        self.setMinimumWidth(420)
         self.result_device: Device | None = None
         self._device = device
 
         form = QFormLayout(self)
+        form.setContentsMargins(20, 20, 20, 16)
+        form.setSpacing(10)
         self.name = QLineEdit(device.name if device else "")
         self.host = QLineEdit(device.host if device else "")
         self.port = QLineEdit(str(device.port if device else 5959))
@@ -82,11 +242,10 @@ class DeviceDialog(QDialog):
         form.addRow(i18n.t("field_password"), self.password)
         form.addRow(i18n.t("field_notes"), self.notes)
 
-        buttons = QDialogButtonBox(
-            Save | Cancel
-        )
+        buttons = QDialogButtonBox(Save | Cancel)
         buttons.button(Save).setText(i18n.t("save"))
         buttons.button(Cancel).setText(i18n.t("cancel"))
+        buttons.button(Save).setObjectName("primary")
         buttons.accepted.connect(self._ok)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
@@ -132,7 +291,10 @@ class SettingsDialog(QDialog):
         self.store = store
         self.setWindowTitle(i18n.t("settings_title"))
         self.setModal(True)
+        self.setMinimumWidth(420)
         form = QFormLayout(self)
+        form.setContentsMargins(20, 20, 20, 16)
+        form.setSpacing(10)
 
         self.lang = QComboBox()
         self.lang.addItem(i18n.t("lang_zh"), "zh_CN")
@@ -151,19 +313,28 @@ class SettingsDialog(QDialog):
         form.addRow(i18n.t("scale"), self.scale)
         form.addRow(i18n.t("probe_interval"), self.probe)
 
+        self.btn_hd = QPushButton(i18n.t("hd_preset"))
+        self.btn_hd.setObjectName("primary")
+        self.btn_hd.clicked.connect(self._apply_hd)
+        form.addRow(self.btn_hd)
+
         hint = QLabel(i18n.t("font_hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #6B7780;")
+        hint.setStyleSheet(f"color: {C_MUTED};")
         form.addRow(hint)
 
-        buttons = QDialogButtonBox(
-            Save | Cancel
-        )
+        buttons = QDialogButtonBox(Save | Cancel)
         buttons.button(Save).setText(i18n.t("save"))
         buttons.button(Cancel).setText(i18n.t("cancel"))
+        buttons.button(Save).setObjectName("primary")
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+
+    def _apply_hd(self) -> None:
+        self.fps.setText("30")
+        self.quality.setText("90")
+        self.scale.setText("1.0")
 
     def _save(self) -> None:
         try:
@@ -172,6 +343,7 @@ class SettingsDialog(QDialog):
             self.store.settings.scale = float(self.scale.text())
             self.store.settings.auto_probe_s = max(3.0, float(self.probe.text()))
             self.store.settings.language = str(self.lang.currentData())
+            self.store.settings.settings_version = 2
         except ValueError:
             QMessageBox.warning(self, i18n.t("tip"), i18n.t("invalid_number"))
             return
@@ -204,8 +376,10 @@ class MainWindow(QMainWindow):
         i18n.on_change(self.retranslate)
 
     def _build(self) -> None:
-        self.resize(1000, 640)
+        self.resize(1120, 700)
+        self.setMinimumSize(920, 580)
         root = QWidget()
+        root.setObjectName("root")
         self.setCentralWidget(root)
         outer = QHBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -214,35 +388,41 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Horizontal)
         outer.addWidget(splitter)
 
-        # Side panel
         side = QFrame()
         side.setObjectName("side")
-        side.setStyleSheet(
-            f"""
-            QFrame#side {{ background: {SIDE_BG}; }}
-            QLabel {{ color: #E8EEF2; }}
-            QLabel#muted {{ color: #9AA7B0; }}
-            QLabel#code {{ color: white; font-size: 22px; font-weight: 700; }}
-            QLineEdit {{ background: #2B3940; color: white; border: 1px solid #3A4A53; padding: 4px; }}
-            QCheckBox {{ color: #9AA7B0; }}
-            """
-        )
+        side.setMinimumWidth(300)
+        side.setMaximumWidth(360)
         side_l = QVBoxLayout(side)
-        side_l.setContentsMargins(20, 22, 20, 20)
+        side_l.setContentsMargins(22, 24, 22, 22)
+        side_l.setSpacing(10)
+
+        self.lbl_brand = QLabel()
+        self.lbl_brand.setObjectName("brand")
+        self.lbl_brand_tag = QLabel()
+        self.lbl_brand_tag.setObjectName("brandTag")
+
         self.lbl_side_title = QLabel()
-        self.lbl_side_title.setStyleSheet("font-size: 16px; font-weight: 700; color: white;")
+        self.lbl_side_title.setObjectName("sectionTitle")
         self.lbl_side_hint = QLabel()
         self.lbl_side_hint.setObjectName("muted")
         self.lbl_side_hint.setWordWrap(True)
+
+        card = QFrame()
+        card.setObjectName("infoCard")
+        card_l = QVBoxLayout(card)
+        card_l.setContentsMargins(14, 14, 14, 14)
+        card_l.setSpacing(8)
+
         self.lbl_local_name = QLabel()
-        self.lbl_code = QLabel()
-        self.lbl_code.setObjectName("code")
+        self.lbl_local_name.setStyleSheet("color:#D7E4EC; font-size:13px; font-weight:600;")
         self.lbl_code_hint = QLabel()
         self.lbl_code_hint.setObjectName("muted")
+        self.lbl_code = QLabel()
+        self.lbl_code.setObjectName("codeValue")
         self.lbl_verify_title = QLabel()
         self.lbl_verify_title.setObjectName("muted")
         self.lbl_verify = QLabel()
-        self.lbl_verify.setStyleSheet("font-size: 18px; font-weight: 700; color: white;")
+        self.lbl_verify.setObjectName("passValue")
         self.chk_show = QCheckBox()
         self.chk_show.toggled.connect(self._refresh_local)
 
@@ -250,87 +430,106 @@ class MainWindow(QMainWindow):
         self.lbl_port = QLabel()
         self.lbl_port.setObjectName("muted")
         self.edit_port = QLineEdit()
-        self.edit_port.setFixedWidth(80)
+        self.edit_port.setFixedWidth(90)
         port_row.addWidget(self.lbl_port)
         port_row.addWidget(self.edit_port)
         port_row.addStretch(1)
 
+        self.lbl_ips_title = QLabel()
+        self.lbl_ips_title.setObjectName("muted")
         self.lbl_ips = QLabel()
         self.lbl_ips.setObjectName("muted")
         self.lbl_ips.setWordWrap(True)
+        self.lbl_ips.setStyleSheet("color:#C5D6E0; font-size:12px;")
+
+        card_l.addWidget(self.lbl_local_name)
+        card_l.addSpacing(4)
+        card_l.addWidget(self.lbl_code_hint)
+        card_l.addWidget(self.lbl_code)
+        card_l.addSpacing(6)
+        card_l.addWidget(self.lbl_verify_title)
+        card_l.addWidget(self.lbl_verify)
+        card_l.addWidget(self.chk_show)
+        card_l.addSpacing(4)
+        card_l.addLayout(port_row)
+        card_l.addWidget(self.lbl_ips_title)
+        card_l.addWidget(self.lbl_ips)
 
         self.btn_host = QPushButton()
+        self.btn_host.setObjectName("primary")
         self.btn_host.setCursor(PointingHandCursor)
+        self.btn_host.setMinimumHeight(40)
         self.btn_host.clicked.connect(self._toggle_host)
-        self._style_accent_button(self.btn_host)
 
+        row_side_btns = QHBoxLayout()
         self.btn_refresh_local = QPushButton()
+        self.btn_refresh_local.setObjectName("ghostDark")
         self.btn_refresh_local.clicked.connect(self._refresh_local)
-        self._style_side_button(self.btn_refresh_local)
-
         self.btn_regen = QPushButton()
+        self.btn_regen.setObjectName("ghostDark")
         self.btn_regen.clicked.connect(self._regen_password)
-        self._style_side_button(self.btn_regen)
+        row_side_btns.addWidget(self.btn_refresh_local)
+        row_side_btns.addWidget(self.btn_regen)
 
         self.lbl_host_state = QLabel()
-        self.lbl_host_state.setStyleSheet("color: #F0C674;")
+        self.lbl_host_state.setStyleSheet(f"color:{C_WARN}; font-size:12px; font-weight:600;")
 
+        side_l.addWidget(self.lbl_brand)
+        side_l.addWidget(self.lbl_brand_tag)
+        side_l.addSpacing(14)
         side_l.addWidget(self.lbl_side_title)
         side_l.addWidget(self.lbl_side_hint)
+        side_l.addWidget(card)
         side_l.addSpacing(8)
-        side_l.addWidget(self.lbl_local_name)
-        side_l.addSpacing(8)
-        side_l.addWidget(self.lbl_code)
-        side_l.addWidget(self.lbl_code_hint)
-        side_l.addSpacing(12)
-        side_l.addWidget(self.lbl_verify_title)
-        side_l.addWidget(self.lbl_verify)
-        side_l.addWidget(self.chk_show)
-        side_l.addSpacing(8)
-        side_l.addLayout(port_row)
-        side_l.addSpacing(8)
-        side_l.addWidget(self.lbl_ips)
-        side_l.addSpacing(16)
         side_l.addWidget(self.btn_host)
-        side_l.addWidget(self.btn_refresh_local)
-        side_l.addWidget(self.btn_regen)
-        side_l.addSpacing(12)
+        side_l.addLayout(row_side_btns)
         side_l.addWidget(self.lbl_host_state)
         side_l.addStretch(1)
-        side.setMinimumWidth(280)
-        side.setMaximumWidth(340)
 
-        # Main panel
         main = QWidget()
         main_l = QVBoxLayout(main)
-        main_l.setContentsMargins(18, 16, 18, 12)
+        main_l.setContentsMargins(22, 20, 22, 16)
+        main_l.setSpacing(12)
 
         header = QHBoxLayout()
+        title_box = QVBoxLayout()
         self.lbl_list_title = QLabel()
-        self.lbl_list_title.setStyleSheet("font-size: 18px; font-weight: 700;")
-        self.btn_settings = QPushButton()
-        self.btn_settings.clicked.connect(self._open_settings)
+        self.lbl_list_title.setObjectName("pageTitle")
+        self.lbl_list_sub = QLabel()
+        self.lbl_list_sub.setObjectName("pageSub")
+        title_box.addWidget(self.lbl_list_title)
+        title_box.addWidget(self.lbl_list_sub)
+        header.addLayout(title_box, 1)
         self.btn_quick = QPushButton()
+        self.btn_settings = QPushButton()
         self.btn_quick.clicked.connect(self._quick_connect)
-        header.addWidget(self.lbl_list_title)
-        header.addStretch(1)
+        self.btn_settings.clicked.connect(self._open_settings)
         header.addWidget(self.btn_quick)
         header.addWidget(self.btn_settings)
 
         search_row = QHBoxLayout()
         self.lbl_search = QLabel()
+        self.lbl_search.setStyleSheet(f"color:{C_MUTED};")
         self.search = QLineEdit()
         self.search.textChanged.connect(self._reload_table)
         search_row.addWidget(self.lbl_search)
         search_row.addWidget(self.search, 1)
 
+        table_card = QFrame()
+        table_card.setObjectName("mainCard")
+        table_l = QVBoxLayout(table_card)
+        table_l.setContentsMargins(8, 8, 8, 8)
         self.table = QTableWidget(0, 4)
         self.table.setSelectionBehavior(SelectRows)
         self.table.setSelectionMode(SingleSelection)
         self.table.setEditTriggers(NoEditTriggers)
+        self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(46)
         self.table.horizontalHeader().setSectionResizeMode(Stretch)
+        self.table.setAlternatingRowColors(False)
         self.table.doubleClicked.connect(self._connect_selected)
+        table_l.addWidget(self.table)
 
         actions = QHBoxLayout()
         self.btn_add = QPushButton()
@@ -338,12 +537,14 @@ class MainWindow(QMainWindow):
         self.btn_del = QPushButton()
         self.btn_probe = QPushButton()
         self.btn_connect = QPushButton()
+        self.btn_connect.setObjectName("primary")
+        self.btn_connect.setMinimumWidth(140)
+        self.btn_connect.setMinimumHeight(38)
         self.btn_add.clicked.connect(self._add_device)
         self.btn_edit.clicked.connect(self._edit_device)
         self.btn_del.clicked.connect(self._delete_device)
         self.btn_probe.clicked.connect(self._probe_now)
         self.btn_connect.clicked.connect(self._connect_selected)
-        self._style_accent_button(self.btn_connect)
         actions.addWidget(self.btn_add)
         actions.addWidget(self.btn_edit)
         actions.addWidget(self.btn_del)
@@ -352,38 +553,52 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.btn_connect)
 
         self.status = QLabel()
-        self.status.setStyleSheet("color: #6B7780;")
+        self.status.setStyleSheet(f"color:{C_MUTED}; font-size:12px;")
 
         main_l.addLayout(header)
         main_l.addLayout(search_row)
-        main_l.addWidget(self.table, 1)
+        main_l.addWidget(table_card, 1)
         main_l.addLayout(actions)
         main_l.addWidget(self.status)
 
         splitter.addWidget(side)
         splitter.addWidget(main)
         splitter.setStretchFactor(1, 1)
+        splitter.setSizes([320, 800])
 
     def retranslate(self) -> None:
         self.setWindowTitle(i18n.t("app_title"))
+        self.lbl_brand.setText(i18n.t("brand"))
+        self.lbl_brand_tag.setText(i18n.t("brand_tag"))
         self.lbl_side_title.setText(i18n.t("local_control"))
         self.lbl_side_hint.setText(i18n.t("local_control_hint"))
         self.lbl_code_hint.setText(i18n.t("device_code"))
         self.lbl_verify_title.setText(i18n.t("verify_code"))
         self.chk_show.setText(i18n.t("show"))
         self.lbl_port.setText(i18n.t("port"))
+        self.lbl_ips_title.setText(i18n.t("local_ip"))
         self.btn_refresh_local.setText(i18n.t("refresh_local"))
         self.btn_regen.setText(i18n.t("regen_code"))
         if self._host is None:
             self.btn_host.setText(i18n.t("start_host"))
+            self.btn_host.setObjectName("primary")
+            self.btn_host.style().unpolish(self.btn_host)
+            self.btn_host.style().polish(self.btn_host)
             self.lbl_host_state.setText(i18n.t("host_off"))
+            self.lbl_host_state.setStyleSheet(f"color:{C_WARN}; font-size:12px; font-weight:600;")
         else:
             self.btn_host.setText(i18n.t("stop_host"))
+            self.btn_host.setObjectName("danger")
+            self.btn_host.style().unpolish(self.btn_host)
+            self.btn_host.style().polish(self.btn_host)
             self.lbl_host_state.setText(i18n.t("host_on", port=self.store.settings.host_port))
+            self.lbl_host_state.setStyleSheet(f"color:#7DFFCE; font-size:12px; font-weight:600;")
         self.lbl_list_title.setText(i18n.t("device_list"))
+        self.lbl_list_sub.setText(i18n.t("device_list_sub"))
         self.btn_settings.setText(i18n.t("settings"))
         self.btn_quick.setText(i18n.t("quick_connect"))
         self.lbl_search.setText(i18n.t("search"))
+        self.search.setPlaceholderText(i18n.t("search_ph"))
         self.table.setHorizontalHeaderLabels(
             [i18n.t("col_name"), i18n.t("col_address"), i18n.t("col_status"), i18n.t("col_last")]
         )
@@ -396,30 +611,6 @@ class MainWindow(QMainWindow):
         self._reload_table()
         if not self.status.text():
             self.status.setText(i18n.t("ready"))
-
-    @staticmethod
-    def _style_accent_button(btn: QPushButton) -> None:
-        btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {ACCENT}; color: white; border: none;
-                padding: 8px 14px; font-weight: 700; border-radius: 4px;
-            }}
-            QPushButton:hover {{ background: {ACCENT_DARK}; }}
-            """
-        )
-
-    @staticmethod
-    def _style_side_button(btn: QPushButton) -> None:
-        btn.setStyleSheet(
-            """
-            QPushButton {
-                background: #2B3940; color: white; border: none;
-                padding: 7px 10px; border-radius: 4px;
-            }
-            QPushButton:hover { background: #364851; }
-            """
-        )
 
     def _set_status(self, text: str) -> None:
         self.status.setText(text)
@@ -435,10 +626,10 @@ class MainWindow(QMainWindow):
         self.lbl_local_name.setText(i18n.t("local_name", name=s.local_name))
         self.lbl_code.setText(self._format_code(s.device_code))
         pwd = s.host_password
-        self.lbl_verify.setText(pwd if self.chk_show.isChecked() else ("*" * max(4, len(pwd))))
+        self.lbl_verify.setText(pwd if self.chk_show.isChecked() else ("•" * max(4, len(pwd))))
         self.edit_port.setText(str(s.host_port))
         ips = list_local_ipv4()
-        self.lbl_ips.setText(i18n.t("local_ip") + "\n" + "\n".join(ips))
+        self.lbl_ips.setText("\n".join(ips))
 
     def _reload_table(self) -> None:
         keyword = self.search.text().strip().lower()
@@ -457,9 +648,9 @@ class MainWindow(QMainWindow):
                 "offline": i18n.t("offline"),
             }.get(status_key, i18n.t("unknown"))
             color = {
-                "online": QColor("#1B8A4A"),
-                "offline": QColor("#A33B3B"),
-            }.get(status_key, QColor("#8A8F96"))
+                "online": QColor(C_ONLINE),
+                "offline": QColor(C_OFFLINE),
+            }.get(status_key, QColor(C_MUTED))
 
             values = [
                 device.name,
@@ -575,17 +766,11 @@ class MainWindow(QMainWindow):
         self._host_thread = threading.Thread(target=runner, name="gui-host", daemon=True)
         self._host_thread.start()
         self.btn_host.setText(i18n.t("stop_host"))
-        self.btn_host.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {DANGER}; color: white; border: none;
-                padding: 8px 14px; font-weight: 700; border-radius: 4px;
-            }}
-            QPushButton:hover {{ background: #9E3B3B; }}
-            """
-        )
+        self.btn_host.setObjectName("danger")
+        self.btn_host.style().unpolish(self.btn_host)
+        self.btn_host.style().polish(self.btn_host)
         self.lbl_host_state.setText(i18n.t("host_on", port=port))
-        self.lbl_host_state.setStyleSheet("color: #7DCEA0;")
+        self.lbl_host_state.setStyleSheet("color:#7DFFCE; font-size:12px; font-weight:600;")
         self._set_status(i18n.t("host_started", port=port))
 
     def _stop_host(self) -> None:
@@ -594,17 +779,21 @@ class MainWindow(QMainWindow):
         if host:
             host.stop()
         self.btn_host.setText(i18n.t("start_host"))
-        self._style_accent_button(self.btn_host)
+        self.btn_host.setObjectName("primary")
+        self.btn_host.style().unpolish(self.btn_host)
+        self.btn_host.style().polish(self.btn_host)
         self.lbl_host_state.setText(i18n.t("host_off"))
-        self.lbl_host_state.setStyleSheet("color: #F0C674;")
+        self.lbl_host_state.setStyleSheet(f"color:{C_WARN}; font-size:12px; font-weight:600;")
         self._set_status(i18n.t("host_stopped"))
 
     def _on_host_crashed(self) -> None:
         self._host = None
         self.btn_host.setText(i18n.t("start_host"))
-        self._style_accent_button(self.btn_host)
+        self.btn_host.setObjectName("primary")
+        self.btn_host.style().unpolish(self.btn_host)
+        self.btn_host.style().polish(self.btn_host)
         self.lbl_host_state.setText(i18n.t("host_crashed"))
-        self.lbl_host_state.setStyleSheet("color: #E07474;")
+        self.lbl_host_state.setStyleSheet(f"color:{C_DANGER}; font-size:12px; font-weight:600;")
         QMessageBox.critical(self, i18n.t("error"), i18n.t("host_crash_msg"))
 
     def _connect_selected(self) -> None:
@@ -667,7 +856,6 @@ class MainWindow(QMainWindow):
             window_title=i18n.t("viewer_title", name=title),
             reconnect=True,
         )
-        # Same QApplication: no subprocess, shared fonts/i18n, less flicker risk.
         win = RemoteClientWindow(cfg, parent=None)
         win.setAttribute(WA_DeleteOnClose, True)
         self._viewers.append(win)
@@ -725,11 +913,11 @@ def _fmt_time(ts: float | None) -> str:
 def run_app() -> None:
     ensure_utf8_stdio()
     app = QApplication.instance() or QApplication([])
-    apply_app_font(app)
-    # Avoid unnecessary style animations that can worsen perceived flicker.
+    apply_app_font(app, point_size=10)
+    app.setStyle("Fusion")
+    app.setStyleSheet(APP_QSS)
     app.setAttribute(AA_DontShowIconsInMenus, False)
     win = MainWindow()
     win.show()
-    # Defer first probe slightly so UI paints first.
     QTimer.singleShot(200, win._probe_now)
-    (getattr(app, 'exec_', None) or app.exec)()
+    (getattr(app, "exec_", None) or app.exec)()

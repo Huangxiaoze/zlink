@@ -126,6 +126,10 @@ SmoothTransformation = _enum(
     getattr(Qt, "SmoothTransformation", None),
     getattr(getattr(Qt, "TransformationMode", None), "SmoothTransformation", None),
 )
+FastTransformation = _enum(
+    getattr(Qt, "FastTransformation", None),
+    getattr(getattr(Qt, "TransformationMode", None), "FastTransformation", None),
+)
 black = _enum(getattr(Qt, "black", None), getattr(getattr(Qt, "GlobalColor", None), "black", None))
 Horizontal = _enum(
     getattr(Qt, "Horizontal", None),

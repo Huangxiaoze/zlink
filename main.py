@@ -21,8 +21,8 @@ def _build_parser() -> argparse.ArgumentParser:
     host.add_argument("--port", type=int, default=5959)
     host.add_argument("--password", default="", help="connection password (required for 0.0.0.0)")
     host.add_argument("--fps", type=float, default=30.0)
-    host.add_argument("--quality", type=int, default=60, help="JPEG quality 30-85")
-    host.add_argument("--scale", type=float, default=0.75, help="capture scale 0.4-1.0")
+    host.add_argument("--quality", type=int, default=90, help="JPEG quality 55-95")
+    host.add_argument("--scale", type=float, default=1.0, help="capture scale 0.6-1.0")
     host.add_argument(
         "--allow-no-password",
         action="store_true",
@@ -34,8 +34,8 @@ def _build_parser() -> argparse.ArgumentParser:
     client.add_argument("--port", type=int, default=5959)
     client.add_argument("--password", default="")
     client.add_argument("--fps", type=float, default=30.0)
-    client.add_argument("--quality", type=int, default=60)
-    client.add_argument("--scale", type=float, default=0.75)
+    client.add_argument("--quality", type=int, default=90)
+    client.add_argument("--scale", type=float, default=1.0)
     client.add_argument("--no-reconnect", action="store_true")
     return parser
 

@@ -218,8 +218,8 @@ magic = b"RD01"
 定义于 `config.py`，调参优先改配置而非散落魔法数：
 
 - `max_fps = 30`
-- `jpeg_quality = 60`（拥塞时可降到 30）
-- `scale = 0.75`（相对原始分辨率）
+- `jpeg_quality = 90`（拥塞时可降到 55；JPEG 使用 4:4:4）
+- `scale = 1.0`（全分辨率采集；拥塞时优先降质量再降分辨率）
 - `heartbeat_interval_s = 2.0`
 - `heartbeat_timeout_s = 8.0`
 - `send_queue_size = 2`（FRAME 队列极短，促发丢帧）
