@@ -177,6 +177,10 @@ PointingHandCursor = _enum(
     getattr(Qt, "PointingHandCursor", None),
     getattr(getattr(Qt, "CursorShape", None), "PointingHandCursor", None),
 )
+AlignCenter = _enum(
+    getattr(Qt, "AlignCenter", None),
+    getattr(getattr(Qt, "AlignmentFlag", None), "AlignCenter", None),
+)
 AA_DontShowIconsInMenus = _enum(
     getattr(Qt, "AA_DontShowIconsInMenus", None),
     getattr(getattr(Qt, "ApplicationAttribute", None), "AA_DontShowIconsInMenus", None),

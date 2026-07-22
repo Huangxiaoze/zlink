@@ -7,6 +7,7 @@ import time
 
 from .qt_bind import (
     AA_DontShowIconsInMenus,
+    AlignCenter,
     Antialiasing,
     Cancel,
     CustomContextMenu,
@@ -28,12 +29,10 @@ from .qt_bind import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMenu,
-    QMessageBox,
     QPainter,
     QPushButton,
     QScrollArea,
@@ -45,7 +44,6 @@ from .qt_bind import (
     Signal,
     WA_DeleteOnClose,
     WA_Hover,
-    Yes,
     dialog_exec,
     make_dialog_button_box,
     menu_exec,
@@ -59,7 +57,13 @@ from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, pro
 from .host import RemoteHost
 from .i18n import i18n
 from .qt_fonts import apply_app_font, ensure_utf8_stdio
-from .confirm_dialog import ask_confirm
+from .confirm_dialog import (
+    ask_confirm,
+    ask_quick_connect,
+    show_error,
+    show_info,
+    show_warning,
+)
 from .themes import (
     DEFAULT_THEME,
     ThemeColors,
@@ -256,7 +260,7 @@ class DeviceDialog(QDialog):
     def _ok(self) -> None:
         host = self.host.text().strip()
         if not host:
-            QMessageBox.warning(self, i18n.t("tip"), i18n.t("fill_host"))
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("fill_host"))
             return
         name = self.name.text().strip() or host
         if self._device:
@@ -355,7 +359,7 @@ class SettingsDialog(QDialog):
             self.store.settings.theme = str(self.theme.currentData() or DEFAULT_THEME)
             self.store.settings.settings_version = 2
         except ValueError:
-            QMessageBox.warning(self, i18n.t("tip"), i18n.t("invalid_number"))
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("invalid_number"))
             return
         self.store.save()
         self.accept()
@@ -557,13 +561,22 @@ class MainWindow(QMainWindow):
         self.device_grid.setVerticalSpacing(12)
         self.device_scroll.setWidget(self.device_grid_host)
 
+        self.empty_host = QWidget()
+        self.empty_host.setObjectName("deviceEmptyHost")
+        empty_l = QVBoxLayout(self.empty_host)
+        empty_l.setContentsMargins(24, 24, 24, 24)
+        empty_l.setSpacing(0)
         self.lbl_device_empty = QLabel()
         self.lbl_device_empty.setObjectName("cardEmpty")
+        self.lbl_device_empty.setAlignment(AlignCenter)
         self.lbl_device_empty.setWordWrap(True)
-        self.lbl_device_empty.hide()
+        empty_l.addStretch(1)
+        empty_l.addWidget(self.lbl_device_empty, 0)
+        empty_l.addStretch(1)
+        self.empty_host.hide()
 
         list_l.addWidget(self.device_scroll, 1)
-        list_l.addWidget(self.lbl_device_empty)
+        list_l.addWidget(self.empty_host, 1)
 
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 0, 0, 0)
@@ -707,14 +720,14 @@ class MainWindow(QMainWindow):
 
         if not rows:
             self.device_scroll.hide()
-            self.lbl_device_empty.show()
+            self.empty_host.show()
             if self.search.text().strip():
                 self.lbl_device_empty.setText(i18n.t("device_empty_search"))
             else:
                 self.lbl_device_empty.setText(i18n.t("device_empty"))
             return
 
-        self.lbl_device_empty.hide()
+        self.empty_host.hide()
         self.device_scroll.show()
 
         cols = self._device_columns()
@@ -795,7 +808,7 @@ class MainWindow(QMainWindow):
     def _edit_device(self, device_id: str | None = None) -> None:
         device = self.store.get(device_id) if device_id else self._selected_device()
         if not device:
-            QMessageBox.information(self, i18n.t("tip"), i18n.t("select_device"))
+            show_info(self, title=i18n.t("tip"), message=i18n.t("select_device"))
             return
         dialog = DeviceDialog(self, i18n.t("edit_title"), device)
         if qt_enum_eq(dialog_exec(dialog), DialogAccepted) and dialog.result_device:
@@ -807,15 +820,16 @@ class MainWindow(QMainWindow):
     def _delete_device(self, device_id: str | None = None) -> None:
         device = self.store.get(device_id) if device_id else self._selected_device()
         if not device:
-            QMessageBox.information(self, i18n.t("tip"), i18n.t("select_device"))
+            show_info(self, title=i18n.t("tip"), message=i18n.t("select_device"))
             return
-        if not qt_enum_eq(
-            QMessageBox.question(
-                self,
-                i18n.t("confirm"),
-                i18n.t("delete_confirm", name=device.name),
-            ),
-            Yes,
+        if not ask_confirm(
+            self,
+            title=i18n.t("delete_title"),
+            message=i18n.t("delete_confirm", name=device.name),
+            eyebrow=i18n.t("confirm"),
+            ok_text=i18n.t("delete"),
+            cancel_text=i18n.t("cancel"),
+            danger=True,
         ):
             return
         self.store.remove(device.id)
@@ -838,7 +852,7 @@ class MainWindow(QMainWindow):
 
     def _regen_password(self) -> None:
         if self._host is not None:
-            QMessageBox.warning(self, i18n.t("tip"), i18n.t("stop_before_regen"))
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("stop_before_regen"))
             return
         self.store.settings.host_password = make_verify_code()
         self.store.save()
@@ -859,7 +873,7 @@ class MainWindow(QMainWindow):
     def _start_host(self) -> None:
         password = self.store.settings.host_password.strip()
         if not password:
-            QMessageBox.warning(self, i18n.t("tip"), i18n.t("empty_password"))
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("empty_password"))
             return
         self.store.settings.host_port = DEFAULT_PORT
         self.store.save()
@@ -960,31 +974,20 @@ class MainWindow(QMainWindow):
         self._restyle(self.btn_host, "primary")
         self.lbl_host_state.setText(i18n.t("host_crashed"))
         self._restyle(self.lbl_host_state, "hostDanger")
-        QMessageBox.critical(self, i18n.t("error"), i18n.t("host_crash_msg"))
+        show_error(self, title=i18n.t("error"), message=i18n.t("host_crash_msg"))
 
     def _quick_connect(self) -> None:
-        host, ok = QInputDialog.getText(self, i18n.t("quick_connect"), i18n.t("quick_host"))
-        if not ok or not host.strip():
+        result = ask_quick_connect(self)
+        if not result:
             return
-        password, ok = QInputDialog.getText(
-            self,
-            i18n.t("quick_connect"),
-            i18n.t("quick_password"),
-            echo=Password,
-        )
-        if not ok:
-            return
-        save = qt_enum_eq(
-            QMessageBox.question(self, i18n.t("quick_connect"), i18n.t("quick_save")),
-            Yes,
-        )
+        host, password, save = result
         device_id = None
         if save:
-            device = Device.create(name=host.strip(), host=host.strip(), password=password)
+            device = Device.create(name=host, host=host, password=password)
             self.store.upsert(device)
             device_id = device.id
             self._reload_devices()
-        self._launch_client(host.strip(), DEFAULT_PORT, password, host.strip(), device_id)
+        self._launch_client(host, DEFAULT_PORT, password, host, device_id)
 
     def _find_viewer(
         self,

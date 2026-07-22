@@ -781,9 +781,14 @@ QLabel#cardStatus {{
     padding: 2px 8px;
     border-radius: 8px;
 }}
+QWidget#deviceEmptyHost {{
+    background: transparent;
+}}
 QLabel#cardEmpty {{
     color: {c.muted};
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 600;
+    qproperty-alignment: AlignCenter;
 }}
 QScrollArea#deviceScroll, QScrollArea#deviceScroll > QWidget > QWidget {{
     background: transparent;
@@ -803,13 +808,6 @@ QScrollBar::handle:vertical {{
     border-radius: 4px;
     min-height: 30px;
 }}
-QMessageBox {{
-    background: {c.card};
-    color: {c.text};
-}}
-QMessageBox QLabel {{
-    color: {c.text};
-}}
 QDialog#confirmDialog {{
     background: {c.card};
     color: {c.text};
@@ -820,7 +818,10 @@ QFrame#confirmAccent {{
     min-height: 4px;
     max-height: 4px;
 }}
-QFrame#confirmAccent[danger="true"] {{
+QFrame#confirmAccent[kind="warn"] {{
+    background: {c.warn};
+}}
+QFrame#confirmAccent[kind="danger"], QFrame#confirmAccent[danger="true"] {{
     background: {c.danger};
 }}
 QLabel#confirmEyebrow {{
@@ -837,6 +838,25 @@ QLabel#confirmTitle {{
 QLabel#confirmMessage {{
     color: {c.muted};
     font-size: 13px;
+}}
+QLineEdit#confirmInput {{
+    background: {c.input_bg};
+    color: {c.text};
+    border: 1px solid {c.input_border};
+    border-radius: 10px;
+    padding: 8px 12px;
+    min-height: 20px;
+    selection-background-color: {c.accent};
+    selection-color: #FFFFFF;
+}}
+QLineEdit#confirmInput:focus {{
+    border-color: {c.accent};
+}}
+QCheckBox#confirmCheck {{
+    color: {c.text};
+    spacing: 8px;
+    font-size: 13px;
+    font-weight: 600;
 }}
 QFrame#confirmFooter {{
     background: transparent;
