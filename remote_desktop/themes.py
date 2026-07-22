@@ -360,9 +360,9 @@ DUSK = ThemeColors(
     input_border="#43342E",
     btn_bg="#2E221E",
     btn_hover="#3A2C27",
-    card_tile="#2E221E",
-    card_tile_hover="#3A2C27",
-    card_selected="#3A2A20",
+    card_tile="#403028",
+    card_tile_hover="#524038",
+    card_selected="#4A3424",
     scroll="#5A463E",
     side="#120E0C",
     side_2="#1E1613",
@@ -570,7 +570,7 @@ QLabel#pageTitle {{
     font-size: 22px;
     font-weight: 800;
 }}
-QLabel#pageSub, QLabel#pageMuted, QLabel#statusBar {{
+QLabel#pageSub, QLabel#pageMuted, QLabel#statusBar, QLabel#cardHint {{
     color: {c.muted};
     font-size: 12px;
 }}
@@ -701,6 +701,28 @@ QPushButton {{
 }}
 QPushButton:hover {{
     background: {c.btn_hover};
+}}
+QMenu {{
+    background: {c.card};
+    color: {c.text};
+    border: 1px solid {c.line};
+    border-radius: 10px;
+    padding: 6px;
+}}
+QMenu::item {{
+    background: transparent;
+    padding: 8px 18px;
+    border-radius: 8px;
+    margin: 1px 0;
+}}
+QMenu::item:selected {{
+    background: {c.card_selected};
+    color: {c.text};
+}}
+QMenu::separator {{
+    height: 1px;
+    background: {c.line};
+    margin: 4px 8px;
 }}
 QPushButton#primary {{
     background: {c.accent};

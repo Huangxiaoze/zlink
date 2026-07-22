@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from PySide2.QtCore import QMimeData, QObject, Qt, QTimer, QUrl, Signal
+    from PySide2.QtCore import QEvent, QMimeData, QObject, Qt, QTimer, QUrl, Signal
     from PySide2.QtGui import (
         QBrush,
         QClipboard,
@@ -23,6 +23,7 @@ try:
     )
     from PySide2.QtWidgets import (
         QAbstractButton,
+        QAction,
         QApplication,
         QCheckBox,
         QComboBox,
@@ -37,6 +38,7 @@ try:
         QLabel,
         QLineEdit,
         QMainWindow,
+        QMenu,
         QMessageBox,
         QPushButton,
         QScrollArea,
@@ -50,8 +52,9 @@ try:
 
     QT_API = "PySide2"
 except ImportError:  # pragma: no cover - modern hosts
-    from PySide6.QtCore import QMimeData, QObject, Qt, QTimer, QUrl, Signal
+    from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QTimer, QUrl, Signal
     from PySide6.QtGui import (
+        QAction,
         QBrush,
         QClipboard,
         QColor,
@@ -83,6 +86,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QLabel,
         QLineEdit,
         QMainWindow,
+        QMenu,
         QMessageBox,
         QPushButton,
         QScrollArea,
@@ -123,6 +127,18 @@ WA_DeleteOnClose = _enum(
 WA_StyledBackground = _enum(
     getattr(Qt, "WA_StyledBackground", None),
     getattr(getattr(Qt, "WidgetAttribute", None), "WA_StyledBackground", None),
+)
+WA_Hover = _enum(
+    getattr(Qt, "WA_Hover", None),
+    getattr(getattr(Qt, "WidgetAttribute", None), "WA_Hover", None),
+)
+HoverEnter = _enum(
+    getattr(QEvent, "HoverEnter", None),
+    getattr(getattr(QEvent, "Type", None), "HoverEnter", None),
+)
+HoverLeave = _enum(
+    getattr(QEvent, "HoverLeave", None),
+    getattr(getattr(QEvent, "Type", None), "HoverLeave", None),
 )
 StrongFocus = _enum(
     getattr(Qt, "StrongFocus", None),
@@ -168,6 +184,10 @@ AA_DontShowIconsInMenus = _enum(
 RightButton = _enum(
     getattr(Qt, "RightButton", None),
     getattr(getattr(Qt, "MouseButton", None), "RightButton", None),
+)
+CustomContextMenu = _enum(
+    getattr(Qt, "CustomContextMenu", None),
+    getattr(getattr(Qt, "ContextMenuPolicy", None), "CustomContextMenu", None),
 )
 MiddleButton = _enum(
     getattr(Qt, "MiddleButton", None),
@@ -346,6 +366,13 @@ def event_pos(event: Any) -> tuple[float, float]:
 def dialog_exec(dialog: QDialog) -> int:
     fn = getattr(dialog, "exec_", None) or getattr(dialog, "exec")
     return int(fn())
+
+
+def menu_exec(menu: QMenu, position: Any = None) -> Any:
+    fn = getattr(menu, "exec_", None) or getattr(menu, "exec")
+    if position is None:
+        return fn()
+    return fn(position)
 
 
 def qt_enum_int(value: Any) -> int:

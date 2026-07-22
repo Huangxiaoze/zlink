@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Fixed listen/connect port for GUI and default CLI usage.
+DEFAULT_PORT = 5959
+
 
 @dataclass
 class StreamConfig:
@@ -24,7 +27,7 @@ class StreamConfig:
 @dataclass
 class NetConfig:
     host: str = "0.0.0.0"
-    port: int = 5959
+    port: int = DEFAULT_PORT
     password: str = ""
     # Longer timeout: HD frames can take seconds on weak links; mid-transfer
     # progress now counts as activity, but keep generous margin anyway.

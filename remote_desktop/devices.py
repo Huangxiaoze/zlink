@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .config import DEFAULT_PORT
+
 
 def app_data_dir() -> Path:
     if os.name == "nt":
@@ -29,7 +31,7 @@ class Device:
     id: str
     name: str
     host: str
-    port: int = 5959
+    port: int = DEFAULT_PORT
     password: str = ""
     notes: str = ""
     last_connected: float | None = None
@@ -39,7 +41,7 @@ class Device:
     def create(
         name: str,
         host: str,
-        port: int = 5959,
+        port: int = DEFAULT_PORT,
         password: str = "",
         notes: str = "",
     ) -> Device:
@@ -47,7 +49,7 @@ class Device:
             id=uuid.uuid4().hex,
             name=name.strip() or host.strip(),
             host=host.strip(),
-            port=int(port),
+            port=DEFAULT_PORT,
             password=password,
             notes=notes.strip(),
         )
@@ -56,7 +58,7 @@ class Device:
 @dataclass
 class AppSettings:
     host_bind: str = "0.0.0.0"
-    host_port: int = 5959
+    host_port: int = DEFAULT_PORT
     host_password: str = ""
     local_name: str = ""
     device_code: str = ""
@@ -108,7 +110,7 @@ class DeviceStore:
             version = 2
         self.settings = AppSettings(
             host_bind=str(settings.get("host_bind", "0.0.0.0")),
-            host_port=int(settings.get("host_port", 5959)),
+            host_port=DEFAULT_PORT,
             host_password=str(settings.get("host_password", "")),
             local_name=str(settings.get("local_name") or socket.gethostname()),
             device_code=str(settings.get("device_code") or _make_device_code()),
@@ -132,7 +134,7 @@ class DeviceStore:
                         id=str(item.get("id") or uuid.uuid4().hex),
                         name=str(item.get("name") or item.get("host") or "device"),
                         host=str(item.get("host") or ""),
-                        port=int(item.get("port") or 5959),
+                        port=DEFAULT_PORT,
                         password=str(item.get("password") or ""),
                         notes=str(item.get("notes") or ""),
                         last_connected=item.get("last_connected"),
@@ -143,6 +145,9 @@ class DeviceStore:
                 continue
 
     def save(self) -> None:
+        self.settings.host_port = DEFAULT_PORT
+        for device in self.devices:
+            device.port = DEFAULT_PORT
         payload: dict[str, Any] = {
             "settings": asdict(self.settings),
             "devices": [asdict(d) for d in self.devices],
@@ -162,6 +167,7 @@ class DeviceStore:
                     pass
 
     def upsert(self, device: Device) -> None:
+        device.port = DEFAULT_PORT
         for i, existing in enumerate(self.devices):
             if existing.id == device.id:
                 self.devices[i] = device

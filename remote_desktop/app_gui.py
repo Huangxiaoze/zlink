@@ -9,13 +9,17 @@ from .qt_bind import (
     AA_DontShowIconsInMenus,
     Antialiasing,
     Cancel,
+    CustomContextMenu,
     DialogAccepted,
     Horizontal,
+    HoverEnter,
+    HoverLeave,
     NoFocus,
     NoPen,
     Password,
     PointingHandCursor,
     QAbstractButton,
+    QAction,
     QApplication,
     QColor,
     QComboBox,
@@ -28,6 +32,7 @@ from .qt_bind import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPainter,
     QPushButton,
@@ -39,15 +44,17 @@ from .qt_bind import (
     Save,
     Signal,
     WA_DeleteOnClose,
+    WA_Hover,
     Yes,
     dialog_exec,
     make_dialog_button_box,
+    menu_exec,
     qt_enum_eq,
 )
 
 from .client import RemoteClientWindow
 from .clipboard_sync import ClipboardBridge
-from .config import ClientConfig, HostConfig, NetConfig, StreamConfig
+from .config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamConfig
 from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_online
 from .host import RemoteHost
 from .i18n import i18n
@@ -120,6 +127,8 @@ class DeviceCard(QFrame):
 
     selected = Signal(str)
     activated = Signal(str)
+    context_menu = Signal(str, object)
+    hover_changed = Signal(bool)
 
     def __init__(self, device: Device, status_key: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -129,6 +138,9 @@ class DeviceCard(QFrame):
         self.setMinimumWidth(220)
         self.setMaximumWidth(360)
         self.setProperty("selected", False)
+        self.setAttribute(WA_Hover, True)
+        self.setContextMenuPolicy(CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
@@ -169,6 +181,18 @@ class DeviceCard(QFrame):
 
         self.bind(device, status_key)
 
+    def _on_context_menu(self, pos) -> None:
+        self.selected.emit(self.device_id)
+        self.context_menu.emit(self.device_id, self.mapToGlobal(pos))
+
+    def event(self, event):  # noqa: N802
+        etype = event.type()
+        if qt_enum_eq(etype, HoverEnter):
+            self.hover_changed.emit(True)
+        elif qt_enum_eq(etype, HoverLeave):
+            self.hover_changed.emit(False)
+        return super().event(event)
+
     def bind(self, device: Device, status_key: str) -> None:
         status_text, status_qss = _status_style(status_key)
         self.lbl_status.setText(status_text)
@@ -178,7 +202,7 @@ class DeviceCard(QFrame):
         else:
             self.lbl_last.setText(i18n.t("never_connected"))
         self.lbl_name.setText(device.name)
-        self.lbl_host.setText("%s:%s" % (device.host, device.port))
+        self.lbl_host.setText(device.host)
         notes = (device.notes or "").strip()
         self.lbl_notes.setText(notes)
         self.lbl_notes.setVisible(bool(notes))
@@ -213,13 +237,11 @@ class DeviceDialog(QDialog):
         form.setSpacing(10)
         self.name = QLineEdit(device.name if device else "")
         self.host = QLineEdit(device.host if device else "")
-        self.port = QLineEdit(str(device.port if device else 5959))
         self.password = QLineEdit(device.password if device else "")
         self.password.setEchoMode(Password)
         self.notes = QLineEdit(device.notes if device else "")
         form.addRow(i18n.t("field_name"), self.name)
         form.addRow(i18n.t("field_host"), self.host)
-        form.addRow(i18n.t("field_port"), self.port)
         form.addRow(i18n.t("field_password"), self.password)
         form.addRow(i18n.t("field_notes"), self.notes)
 
@@ -236,20 +258,13 @@ class DeviceDialog(QDialog):
         if not host:
             QMessageBox.warning(self, i18n.t("tip"), i18n.t("fill_host"))
             return
-        try:
-            port = int(self.port.text().strip())
-            if not (1 <= port <= 65535):
-                raise ValueError
-        except ValueError:
-            QMessageBox.warning(self, i18n.t("tip"), i18n.t("bad_port"))
-            return
         name = self.name.text().strip() or host
         if self._device:
             self.result_device = Device(
                 id=self._device.id,
                 name=name,
                 host=host,
-                port=port,
+                port=DEFAULT_PORT,
                 password=self.password.text(),
                 notes=self.notes.text().strip(),
                 last_connected=self._device.last_connected,
@@ -259,7 +274,6 @@ class DeviceDialog(QDialog):
             self.result_device = Device.create(
                 name=name,
                 host=host,
-                port=port,
                 password=self.password.text(),
                 notes=self.notes.text().strip(),
             )
@@ -365,6 +379,7 @@ class MainWindow(QMainWindow):
         self._host_clip_timer: QTimer | None = None
         self._selected_device_id: str | None = None
         self._device_cards: dict[str, DeviceCard] = {}
+        self._card_hover_count = 0
 
         self.probe_done.connect(self._apply_probe)
         self.host_crashed.connect(self._on_host_crashed)
@@ -376,6 +391,8 @@ class MainWindow(QMainWindow):
         self._reload_devices()
         self._start_probe_loop()
         i18n.on_change(self.retranslate)
+        # Start hosting after the first UI paint; user can still stop/start manually.
+        QTimer.singleShot(0, self._auto_start_host)
 
     def _build(self) -> None:
         self.resize(1120, 700)
@@ -441,15 +458,6 @@ class MainWindow(QMainWindow):
         verify_head.addWidget(self.lbl_show_code, 0)
         verify_head.addWidget(self.chk_show, 0)
 
-        port_row = QHBoxLayout()
-        self.lbl_port = QLabel()
-        self.lbl_port.setObjectName("sideMuted")
-        self.edit_port = QLineEdit()
-        self.edit_port.setFixedWidth(90)
-        port_row.addWidget(self.lbl_port)
-        port_row.addWidget(self.edit_port)
-        port_row.addStretch(1)
-
         self.lbl_ips_title = QLabel()
         self.lbl_ips_title.setObjectName("sideMuted")
         self.lbl_ips = QLabel()
@@ -464,7 +472,6 @@ class MainWindow(QMainWindow):
         card_l.addLayout(verify_head)
         card_l.addWidget(self.lbl_verify)
         card_l.addSpacing(4)
-        card_l.addLayout(port_row)
         card_l.addWidget(self.lbl_ips_title)
         card_l.addWidget(self.lbl_ips)
 
@@ -505,18 +512,19 @@ class MainWindow(QMainWindow):
         main_l.setSpacing(12)
 
         header = QHBoxLayout()
-        title_box = QVBoxLayout()
         self.lbl_list_title = QLabel()
         self.lbl_list_title.setObjectName("pageTitle")
-        self.lbl_list_sub = QLabel()
-        self.lbl_list_sub.setObjectName("pageSub")
-        title_box.addWidget(self.lbl_list_title)
-        title_box.addWidget(self.lbl_list_sub)
-        header.addLayout(title_box, 1)
+        header.addWidget(self.lbl_list_title, 1)
+        self.btn_add = QPushButton()
+        self.btn_probe = QPushButton()
         self.btn_quick = QPushButton()
         self.btn_settings = QPushButton()
+        self.btn_add.clicked.connect(self._add_device)
+        self.btn_probe.clicked.connect(self._probe_now)
         self.btn_quick.clicked.connect(self._quick_connect)
         self.btn_settings.clicked.connect(self._open_settings)
+        header.addWidget(self.btn_add)
+        header.addWidget(self.btn_probe)
         header.addWidget(self.btn_quick)
         header.addWidget(self.btn_settings)
 
@@ -557,35 +565,23 @@ class MainWindow(QMainWindow):
         list_l.addWidget(self.device_scroll, 1)
         list_l.addWidget(self.lbl_device_empty)
 
-        actions = QHBoxLayout()
-        self.btn_add = QPushButton()
-        self.btn_edit = QPushButton()
-        self.btn_del = QPushButton()
-        self.btn_probe = QPushButton()
-        self.btn_connect = QPushButton()
-        self.btn_connect.setObjectName("primary")
-        self.btn_connect.setMinimumWidth(140)
-        self.btn_connect.setMinimumHeight(38)
-        self.btn_add.clicked.connect(self._add_device)
-        self.btn_edit.clicked.connect(self._edit_device)
-        self.btn_del.clicked.connect(self._delete_device)
-        self.btn_probe.clicked.connect(self._probe_now)
-        self.btn_connect.clicked.connect(self._connect_selected)
-        actions.addWidget(self.btn_add)
-        actions.addWidget(self.btn_edit)
-        actions.addWidget(self.btn_del)
-        actions.addWidget(self.btn_probe)
-        actions.addStretch(1)
-        actions.addWidget(self.btn_connect)
-
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.setSpacing(12)
         self.status = QLabel()
         self.status.setObjectName("statusBar")
+        self.lbl_card_hint = QLabel()
+        self.lbl_card_hint.setObjectName("cardHint")
+        self.lbl_card_hint.setWordWrap(False)
+        # Keep the footer height stable: never show/hide this label.
+        self._sync_footer_height()
+        footer.addWidget(self.status, 1)
+        footer.addWidget(self.lbl_card_hint, 0)
 
         main_l.addLayout(header)
         main_l.addLayout(search_row)
         main_l.addWidget(list_card, 1)
-        main_l.addLayout(actions)
-        main_l.addWidget(self.status)
+        main_l.addLayout(footer)
 
         splitter.addWidget(side)
         splitter.addWidget(main)
@@ -601,7 +597,6 @@ class MainWindow(QMainWindow):
         self.lbl_code_hint.setText(i18n.t("device_code"))
         self.lbl_verify_title.setText(i18n.t("verify_code"))
         self._sync_show_code_label()
-        self.lbl_port.setText(i18n.t("port"))
         self.lbl_ips_title.setText(i18n.t("local_ip"))
         self.btn_refresh_local.setText(i18n.t("refresh_local"))
         self.btn_regen.setText(i18n.t("regen_code"))
@@ -613,23 +608,21 @@ class MainWindow(QMainWindow):
         else:
             self.btn_host.setText(i18n.t("stop_host"))
             self._restyle(self.btn_host, "danger")
-            self.lbl_host_state.setText(i18n.t("host_on", port=self.store.settings.host_port))
+            self.lbl_host_state.setText(i18n.t("host_on", port=DEFAULT_PORT))
             self._restyle(self.lbl_host_state, "hostOk")
         self.lbl_list_title.setText(i18n.t("device_list"))
-        self.lbl_list_sub.setText(i18n.t("device_list_sub"))
         self.btn_settings.setText(i18n.t("settings"))
+        self.btn_add.setText(i18n.t("add_device"))
+        self.btn_probe.setText(i18n.t("refresh_status"))
         self.btn_quick.setText(i18n.t("quick_connect"))
         self.lbl_search.setText(i18n.t("search"))
         self.search.setPlaceholderText(i18n.t("search_ph"))
-        self.btn_add.setText(i18n.t("add_device"))
-        self.btn_edit.setText(i18n.t("edit"))
-        self.btn_del.setText(i18n.t("delete"))
-        self.btn_probe.setText(i18n.t("refresh_status"))
-        self.btn_connect.setText(i18n.t("remote_control"))
         self._refresh_local()
         self._reload_devices()
         if not self.status.text():
             self.status.setText(i18n.t("ready"))
+        self._sync_footer_height()
+        self._update_card_hint()
 
     def _restyle(self, widget: QWidget, object_name: str) -> None:
         """Switch objectName and clear inline styles so theme QSS applies cleanly."""
@@ -665,7 +658,6 @@ class MainWindow(QMainWindow):
         self.lbl_code.setText(self._format_code(s.device_code))
         pwd = s.host_password
         self.lbl_verify.setText(pwd if self.chk_show.isChecked() else ("•" * max(4, len(pwd))))
-        self.edit_port.setText(str(s.host_port))
         ips = list_local_ipv4()
         self.lbl_ips.setText("\n".join(ips))
         self._sync_show_code_label()
@@ -680,6 +672,20 @@ class MainWindow(QMainWindow):
             rows.append(device)
         return rows
 
+    def _sync_footer_height(self) -> None:
+        """Reserve a constant footer band so hover hints don't resize the list."""
+        tip = i18n.t("device_list_sub")
+        metrics = self.lbl_card_hint.fontMetrics()
+        height = max(metrics.height(), metrics.boundingRect(tip).height()) + 4
+        self.status.setFixedHeight(height)
+        self.lbl_card_hint.setFixedHeight(height)
+
+    def _update_card_hint(self) -> None:
+        if self._card_hover_count > 0:
+            self.lbl_card_hint.setText(i18n.t("device_list_sub"))
+        else:
+            self.lbl_card_hint.clear()
+
     def _clear_device_grid(self) -> None:
         while self.device_grid.count():
             item = self.device_grid.takeAt(0)
@@ -687,6 +693,8 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
         self._device_cards.clear()
+        self._card_hover_count = 0
+        self._update_card_hint()
 
     def _reload_devices(self) -> None:
         rows = self._filtered_devices()
@@ -716,6 +724,8 @@ class MainWindow(QMainWindow):
             card = DeviceCard(device, status_key, self.device_grid_host)
             card.selected.connect(self._on_card_selected)
             card.activated.connect(self._on_card_activated)
+            card.context_menu.connect(self._on_card_context_menu)
+            card.hover_changed.connect(self._on_card_hover_changed)
             card.set_selected(device.id == selected)
             self._device_cards[device.id] = card
             self.device_grid.addWidget(card, index // cols, index % cols)
@@ -736,6 +746,13 @@ class MainWindow(QMainWindow):
         if cols != getattr(self, "_laid_cols", None):
             self._reload_devices()
 
+    def _on_card_hover_changed(self, hovering: bool) -> None:
+        if hovering:
+            self._card_hover_count += 1
+        else:
+            self._card_hover_count = max(0, self._card_hover_count - 1)
+        self._update_card_hint()
+
     def _on_card_selected(self, device_id: str) -> None:
         self._selected_device_id = device_id
         for did, card in self._device_cards.items():
@@ -746,7 +763,20 @@ class MainWindow(QMainWindow):
         device = self.store.get(device_id)
         if device is None:
             return
-        self._launch_client(device.host, device.port, device.password, device.name, device.id)
+        self._launch_client(device.host, DEFAULT_PORT, device.password, device.name, device.id)
+
+    def _on_card_context_menu(self, device_id: str, global_pos) -> None:
+        self._on_card_selected(device_id)
+        menu = QMenu(self)
+        act_edit = QAction(i18n.t("edit"), menu)
+        act_delete = QAction(i18n.t("delete"), menu)
+        menu.addAction(act_edit)
+        menu.addAction(act_delete)
+        chosen = menu_exec(menu, global_pos)
+        if chosen is act_edit:
+            self._edit_device(device_id)
+        elif chosen is act_delete:
+            self._delete_device(device_id)
 
     def _selected_device(self) -> Device | None:
         if not self._selected_device_id:
@@ -762,8 +792,8 @@ class MainWindow(QMainWindow):
             self._set_status(i18n.t("added", name=dialog.result_device.name))
             self._probe_now()
 
-    def _edit_device(self) -> None:
-        device = self._selected_device()
+    def _edit_device(self, device_id: str | None = None) -> None:
+        device = self.store.get(device_id) if device_id else self._selected_device()
         if not device:
             QMessageBox.information(self, i18n.t("tip"), i18n.t("select_device"))
             return
@@ -774,8 +804,8 @@ class MainWindow(QMainWindow):
             self._reload_devices()
             self._set_status(i18n.t("updated", name=dialog.result_device.name))
 
-    def _delete_device(self) -> None:
-        device = self._selected_device()
+    def _delete_device(self, device_id: str | None = None) -> None:
+        device = self.store.get(device_id) if device_id else self._selected_device()
         if not device:
             QMessageBox.information(self, i18n.t("tip"), i18n.t("select_device"))
             return
@@ -821,19 +851,17 @@ class MainWindow(QMainWindow):
         else:
             self._start_host()
 
-    def _start_host(self) -> None:
-        try:
-            port = int(self.edit_port.text().strip())
-            if not (1 <= port <= 65535):
-                raise ValueError
-        except ValueError:
-            QMessageBox.warning(self, i18n.t("tip"), i18n.t("bad_port"))
+    def _auto_start_host(self) -> None:
+        if self._host is not None:
             return
+        self._start_host()
+
+    def _start_host(self) -> None:
         password = self.store.settings.host_password.strip()
         if not password:
             QMessageBox.warning(self, i18n.t("tip"), i18n.t("empty_password"))
             return
-        self.store.settings.host_port = port
+        self.store.settings.host_port = DEFAULT_PORT
         self.store.save()
 
         stream = StreamConfig(
@@ -841,7 +869,7 @@ class MainWindow(QMainWindow):
             jpeg_quality=self.store.settings.jpeg_quality,
             scale=self.store.settings.scale,
         ).clamp()
-        net = NetConfig(host=self.store.settings.host_bind, port=port, password=password)
+        net = NetConfig(host=self.store.settings.host_bind, port=DEFAULT_PORT, password=password)
         host = RemoteHost(HostConfig(net=net, stream=stream, bind_require_password=True))
         # Wake GUI immediately when clipboard arrives (queued across threads).
         host.clipboard_notify = lambda: self.host_clip_wakeup.emit()
@@ -859,9 +887,9 @@ class MainWindow(QMainWindow):
         self._start_host_clipboard()
         self.btn_host.setText(i18n.t("stop_host"))
         self._restyle(self.btn_host, "danger")
-        self.lbl_host_state.setText(i18n.t("host_on", port=port))
+        self.lbl_host_state.setText(i18n.t("host_on", port=DEFAULT_PORT))
         self._restyle(self.lbl_host_state, "hostOk")
-        self._set_status(i18n.t("host_started", port=port))
+        self._set_status(i18n.t("host_started", port=DEFAULT_PORT))
 
     def _enqueue_host_clipboard(self, packet: bytes) -> None:
         host = self._host
@@ -934,26 +962,9 @@ class MainWindow(QMainWindow):
         self._restyle(self.lbl_host_state, "hostDanger")
         QMessageBox.critical(self, i18n.t("error"), i18n.t("host_crash_msg"))
 
-    def _connect_selected(self) -> None:
-        device = self._selected_device()
-        if not device:
-            QMessageBox.information(self, i18n.t("tip"), i18n.t("select_device"))
-            return
-        self._launch_client(device.host, device.port, device.password, device.name, device.id)
-
     def _quick_connect(self) -> None:
         host, ok = QInputDialog.getText(self, i18n.t("quick_connect"), i18n.t("quick_host"))
         if not ok or not host.strip():
-            return
-        port_s, ok = QInputDialog.getText(
-            self, i18n.t("quick_connect"), i18n.t("quick_port"), text="5959"
-        )
-        if not ok:
-            return
-        try:
-            port = int(port_s)
-        except ValueError:
-            QMessageBox.warning(self, i18n.t("tip"), i18n.t("bad_port"))
             return
         password, ok = QInputDialog.getText(
             self,
@@ -969,11 +980,11 @@ class MainWindow(QMainWindow):
         )
         device_id = None
         if save:
-            device = Device.create(name=host.strip(), host=host.strip(), port=port, password=password)
+            device = Device.create(name=host.strip(), host=host.strip(), password=password)
             self.store.upsert(device)
             device_id = device.id
             self._reload_devices()
-        self._launch_client(host.strip(), port, password, host.strip(), device_id)
+        self._launch_client(host.strip(), DEFAULT_PORT, password, host.strip(), device_id)
 
     def _find_viewer(
         self,
