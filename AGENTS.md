@@ -49,11 +49,14 @@ Client: input events → TCP send → Host inject
 
 ### 2.3 稳定性策略
 
-- 应用层 **心跳**（双向）+ 读超时检测死连接
+- 应用层 **心跳** + 活动超时（`last_activity`，含大帧分片接收进度）
+- **发送锁**：所有 `send_*` 必须经 `Connection` 锁，禁止多线程裸 `sock.send`
+- **整帧原子发送**：拥塞时可整帧丢弃，绝不可半截发送后改发别的消息
+- 键鼠：鼠标 move 限频（约 30Hz），down/up/key 立即发送
+- Host **不要** 回显 HEARTBEAT（接收即刷新活性；回显易引发发送风暴/竞态）
 - 消息 **长度前缀帧**，避免粘包/半包导致状态机崩溃
-- Host 单会话（同时仅一个控制端），简化锁与资源生命周期
-- Client 支持指数退避重连
-- 所有线程以 `threading.Event` 统一停机，禁止裸 `daemon` 依赖解释器退出
+- Host 单会话；Client 指数退避重连
+- 所有线程以 `threading.Event` 统一停机
 
 ### 2.4 可移植性策略
 

@@ -26,12 +26,14 @@ class NetConfig:
     host: str = "0.0.0.0"
     port: int = 5959
     password: str = ""
-    heartbeat_interval_s: float = 2.0
-    heartbeat_timeout_s: float = 8.0
-    connect_timeout_s: float = 8.0
+    # Longer timeout: HD frames can take seconds on weak links; mid-transfer
+    # progress now counts as activity, but keep generous margin anyway.
+    heartbeat_interval_s: float = 3.0
+    heartbeat_timeout_s: float = 25.0
+    connect_timeout_s: float = 10.0
     frame_queue_size: int = 2
     max_payload: int = 16 * 1024 * 1024
-    recv_buffer: int = 256 * 1024
+    recv_buffer: int = 2 * 1024 * 1024
 
 
 @dataclass

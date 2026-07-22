@@ -155,28 +155,48 @@ class RemoteHost:
     def _send_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         pending_bytes = 0
         last_adapt = time.monotonic()
+        send_failures = 0
         while not session_stop.is_set() and not self._stop.is_set():
+            # Keep host→client heartbeat even when capture has no new frame.
+            now = time.monotonic()
+            if (now - conn.last_tx) >= self.config.net.heartbeat_interval_s:
+                try:
+                    conn.send_heartbeat()
+                except (ConnectionError, OSError):
+                    session_stop.set()
+                    break
+
             frame = self._capturer.pop_latest()
             if frame is None:
                 session_stop.wait(0.002)
                 continue
-            try:
-                packet = pack_frame_message(
-                    frame.jpeg,
-                    width=frame.width,
-                    height=frame.height,
-                    seq=self._capturer.sequence,
-                    quality=frame.quality,
-                    scale=frame.scale,
+            packet = pack_frame_message(
+                frame.jpeg,
+                width=frame.width,
+                height=frame.height,
+                seq=self._capturer.sequence,
+                quality=frame.quality,
+                scale=frame.scale,
+            )
+            # Drop stale frames under congestion instead of blocking forever.
+            if not conn.try_send_raw(packet):
+                send_failures += 1
+                if conn.closed or send_failures >= 8:
+                    session_stop.set()
+                    break
+                # Force quality down quickly when sends keep failing/timing out.
+                self._apply_quality(
+                    {
+                        "max_fps": max(10.0, self.stream.max_fps - 5),
+                        "jpeg_quality": max(self.stream.min_jpeg_quality, self.stream.jpeg_quality - 8),
+                        "scale": max(self.stream.min_scale, self.stream.scale - 0.1),
+                    }
                 )
-                conn.send_raw(packet)
-                pending_bytes = len(packet)
-            except (ConnectionError, OSError):
-                session_stop.set()
-                break
+                session_stop.wait(0.01)
+                continue
+            send_failures = 0
+            pending_bytes = len(packet)
 
-            # Congestion control: prefer lowering JPEG quality before resolution,
-            # and recover back toward full HD (scale=1.0 / high quality).
             now = time.monotonic()
             if now - last_adapt > 1.2:
                 last_adapt = now
@@ -207,19 +227,11 @@ class RemoteHost:
                             }
                         )
 
-            # Heartbeat from sender path as well
-            if (now - conn.last_tx) >= self.config.net.heartbeat_interval_s:
-                try:
-                    conn.send_heartbeat()
-                except (ConnectionError, OSError):
-                    session_stop.set()
-                    break
-
     def _watchdog_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         timeout = self.config.net.heartbeat_timeout_s
         while not session_stop.is_set() and not self._stop.is_set():
             if conn.is_heartbeat_expired(timeout):
-                log.warning("heartbeat timeout")
+                log.warning("heartbeat timeout (%.1fs idle)", timeout)
                 session_stop.set()
                 conn.close()
                 break
@@ -232,7 +244,11 @@ class RemoteHost:
         session_stop: threading.Event,
     ) -> None:
         while not session_stop.is_set() and not self._stop.is_set():
-            frame = conn.recv_frame()
+            try:
+                frame = conn.recv_frame(stop_event=session_stop)
+            except ConnectionError:
+                session_stop.set()
+                break
             if frame.type == MsgType.MOUSE:
                 injector.handle_mouse(decode_json(frame.payload))
             elif frame.type == MsgType.KEY:
@@ -240,12 +256,9 @@ class RemoteHost:
             elif frame.type == MsgType.QUALITY:
                 self._apply_quality(decode_json(frame.payload))
             elif frame.type == MsgType.HEARTBEAT:
-                # reply to keep both sides fresh
-                try:
-                    conn.send_heartbeat()
-                except (ConnectionError, OSError):
-                    session_stop.set()
-                    break
+                # Receiving heartbeat already refreshes liveness; do not echo
+                # (echo caused multi-thread send races and traffic storms).
+                continue
             elif frame.type == MsgType.BYE:
                 session_stop.set()
                 break

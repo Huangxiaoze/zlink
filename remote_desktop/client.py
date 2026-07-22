@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from . import PROTOCOL_VERSION
@@ -177,6 +178,8 @@ class RemoteClientWindow(QMainWindow):
         self._lock = threading.Lock()
         self._net_thread: Optional[threading.Thread] = None
         self._hud_tick = 0
+        self._last_mouse_move_ts = 0.0
+        self._mouse_move_interval_s = 1.0 / 30.0  # throttle move flood
 
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
@@ -315,10 +318,15 @@ class RemoteClientWindow(QMainWindow):
         hb.start()
         try:
             while not self._stop.is_set() and not session_stop.is_set():
-                fr = conn.recv_frame()
+                try:
+                    fr = conn.recv_frame(stop_event=session_stop)
+                except ConnectionError:
+                    break
                 if fr.type == MsgType.FRAME:
                     meta, jpeg = unpack_frame_message(fr.payload)
                     self._bus.frame_jpeg.emit(jpeg, meta)
+                elif fr.type == MsgType.HEARTBEAT:
+                    continue
                 elif fr.type == MsgType.BYE:
                     break
         finally:
@@ -332,22 +340,31 @@ class RemoteClientWindow(QMainWindow):
         interval = self.config.net.heartbeat_interval_s
         timeout = self.config.net.heartbeat_timeout_s
         while not session_stop.is_set() and not self._stop.is_set():
-            try:
-                conn.send_heartbeat()
-            except (ConnectionError, OSError):
-                session_stop.set()
-                conn.close()
-                break
+            # Only send heartbeat when we have been quiet on TX for a while;
+            # frames/input already prove the pipe is alive from host side.
+            if (time.monotonic() - conn.last_tx) >= interval:
+                try:
+                    conn.send_heartbeat()
+                except (ConnectionError, OSError):
+                    session_stop.set()
+                    conn.close()
+                    break
             if conn.is_heartbeat_expired(timeout):
+                log.warning("host idle timeout (%.1fs)", timeout)
                 session_stop.set()
                 conn.close()
                 break
-            session_stop.wait(interval)
+            session_stop.wait(min(1.0, interval))
 
     def _handle_mouse(self, action: str, x: float, y: float, extra: Dict[str, Any]) -> None:
         conn = self._conn
-        if not conn:
+        if not conn or conn.closed:
             return
+        if action == "move":
+            now = time.monotonic()
+            if (now - self._last_mouse_move_ts) < self._mouse_move_interval_s:
+                return
+            self._last_mouse_move_ts = now
         payload = {"action": action, "x": x, "y": y}
         payload.update(extra)
         try:
@@ -357,7 +374,7 @@ class RemoteClientWindow(QMainWindow):
 
     def _handle_key(self, action: str, key: str) -> None:
         conn = self._conn
-        if not conn:
+        if not conn or conn.closed:
             return
         try:
             conn.send_json(MsgType.KEY, {"action": action, "key": key})

@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import select
 import socket
+import sys
+import threading
 import time
-from typing import Callable
+from typing import Callable, Optional
 
 from .protocol import (
     HEADER_SIZE,
@@ -21,13 +24,37 @@ from .protocol import (
 log = logging.getLogger(__name__)
 
 
-def configure_socket(sock: socket.socket, recv_buffer: int = 256 * 1024) -> None:
+def configure_socket(sock: socket.socket, recv_buffer: int = 2 * 1024 * 1024) -> None:
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, recv_buffer)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, recv_buffer)
     except OSError:
+        pass
+    _enable_keepalive_probes(sock)
+    # Allow recv/send loops to wake periodically; 2s balances liveness vs HD frames.
+    sock.settimeout(2.0)
+
+
+def _enable_keepalive_probes(sock: socket.socket) -> None:
+    """Faster dead-peer detection than default OS keepalive."""
+    try:
+        if sys.platform == "win32":
+            # Windows: SIO_KEEPALIVE_VALS — on, idle 30s, interval 5s
+            idle_ms, interval_ms = 30_000, 5_000
+            sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, idle_ms, interval_ms))  # type: ignore[attr-defined]
+            return
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+        if hasattr(socket, "TCP_KEEPINTVL"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+        if hasattr(socket, "TCP_KEEPCNT"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 5)
+        # macOS uses TCP_KEEPALIVE (idle seconds)
+        if sys.platform == "darwin" and hasattr(socket, "TCP_KEEPALIVE"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, 30)
+    except (OSError, AttributeError, ValueError):
         pass
 
 
@@ -46,8 +73,12 @@ class Connection:
         self.sock = sock
         self.max_payload = max_payload
         self._closed = False
-        self.last_rx = time.monotonic()
-        self.last_tx = time.monotonic()
+        self._send_lock = threading.Lock()
+        now = time.monotonic()
+        self.last_rx = now
+        self.last_tx = now
+        # Any successful IO progress (including partial recv of a large frame).
+        self.last_activity = now
 
     @property
     def closed(self) -> bool:
@@ -66,16 +97,39 @@ class Connection:
         except OSError:
             pass
 
+    def touch_rx(self) -> None:
+        now = time.monotonic()
+        self.last_rx = now
+        self.last_activity = now
+
+    def touch_tx(self) -> None:
+        now = time.monotonic()
+        self.last_tx = now
+        self.last_activity = now
+
     def send_raw(self, data: bytes) -> None:
+        """Send a full packet. Never abandons a partial write (would desync protocol)."""
         if self._closed:
             raise ConnectionError("connection closed")
         view = memoryview(data)
-        while view:
-            n = self.sock.send(view)
-            if n == 0:
-                raise ConnectionError("socket closed during send")
-            view = view[n:]
-        self.last_tx = time.monotonic()
+        with self._send_lock:
+            if self._closed:
+                raise ConnectionError("connection closed")
+            stall_rounds = 0
+            while view:
+                try:
+                    n = self.sock.send(view)
+                    stall_rounds = 0
+                except socket.timeout:
+                    stall_rounds += 1
+                    self.touch_tx()  # still alive, just backed up
+                    if stall_rounds >= 15:  # ~30s with 2s timeout
+                        raise ConnectionError("send stalled too long")
+                    continue
+                if n == 0:
+                    raise ConnectionError("socket closed during send")
+                view = view[n:]
+                self.touch_tx()
 
     def send_frame(self, frame: Frame) -> None:
         self.send_raw(pack_frame(frame.type, frame.payload, frame.flags))
@@ -86,28 +140,55 @@ class Connection:
     def send_heartbeat(self) -> None:
         self.send_json(MsgType.HEARTBEAT, {"t": time.time()})
 
-    def recv_exact(self, size: int) -> bytes:
+    def try_send_raw(self, data: bytes) -> bool:
+        """Drop whole frame if socket not writable; never partially send."""
+        if self._closed:
+            return False
+        try:
+            with self._send_lock:
+                if self._closed:
+                    return False
+                _, writable, _ = select.select([], [self.sock], [], 0.0)
+                if not writable:
+                    return False
+            # send_raw re-acquires lock and writes the full datagram atomically
+            # relative to other senders.
+            self.send_raw(data)
+            return True
+        except (ConnectionError, OSError) as exc:
+            log.debug("try_send failed: %s", exc)
+            return False
+
+    def recv_exact(self, size: int, stop_event: Optional[threading.Event] = None) -> bytes:
         chunks: list[bytes] = []
         remaining = size
         while remaining > 0:
-            chunk = self.sock.recv(remaining)
+            if self._closed or (stop_event is not None and stop_event.is_set()):
+                raise ConnectionError("connection closed during recv")
+            try:
+                chunk = self.sock.recv(min(remaining, 256 * 1024))
+            except socket.timeout:
+                continue
             if not chunk:
                 raise ConnectionError("socket closed during recv")
+            # Critical: update liveness on every chunk so large FRAME transfers
+            # do not trip heartbeat watchdog mid-download.
+            self.touch_rx()
             chunks.append(chunk)
             remaining -= len(chunk)
-        self.last_rx = time.monotonic()
         return b"".join(chunks)
 
-    def recv_frame(self) -> Frame:
-        header = self.recv_exact(HEADER_SIZE)
+    def recv_frame(self, stop_event: Optional[threading.Event] = None) -> Frame:
+        header = self.recv_exact(HEADER_SIZE, stop_event=stop_event)
         msg_type, flags, length = unpack_header(header)
         if length > self.max_payload:
             raise ProtocolError(f"payload {length} exceeds max {self.max_payload}")
-        payload = self.recv_exact(length) if length else b""
+        payload = self.recv_exact(length, stop_event=stop_event) if length else b""
         return Frame(type=msg_type, payload=payload, flags=flags)
 
     def is_heartbeat_expired(self, timeout_s: float) -> bool:
-        return (time.monotonic() - self.last_rx) > timeout_s
+        # Use last_activity so partial transfers / sends count as alive.
+        return (time.monotonic() - self.last_activity) > timeout_s
 
 
 def serve_forever(
@@ -115,7 +196,7 @@ def serve_forever(
     port: int,
     handler: Callable[[Connection, tuple], None],
     should_stop: Callable[[], bool],
-    recv_buffer: int = 256 * 1024,
+    recv_buffer: int = 2 * 1024 * 1024,
 ) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -140,10 +221,9 @@ def serve_forever(
                 conn.close()
 
 
-def connect_to(host: str, port: int, timeout_s: float, recv_buffer: int = 256 * 1024) -> Connection:
+def connect_to(host: str, port: int, timeout_s: float, recv_buffer: int = 2 * 1024 * 1024) -> Connection:
     sock = socket.create_connection((host, port), timeout=timeout_s)
     configure_socket(sock, recv_buffer=recv_buffer)
-    sock.settimeout(None)
     return Connection(sock)
 
 
