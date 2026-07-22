@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "remote-desktop"
+version = "0.1.0"
+description = "Cross-platform remote desktop control (Python)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "mss>=9.0.1",
+  "Pillow>=10.0.0",
+  "pynput>=1.7.6",
+  "pygame>=2.5.0",
+]
+
+[project.scripts]
+remote-desktop = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["remote_desktop*"]
