@@ -51,7 +51,15 @@ from .client import RemoteClientWindow
 from .clipboard_sync import ClipboardBridge
 from .config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamConfig
 from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_online
-from .file_transfer import FileAssembler, MAX_FILE_BYTES, send_file
+from .file_transfer import (
+    FileAssembler,
+    MAX_FILE_BYTES,
+    list_directory,
+    pack_download_error,
+    pack_list_result,
+    send_file,
+)
+from .protocol import unpack_file_message
 from .host import RemoteHost
 from .i18n import i18n
 from .qt_fonts import apply_app_font, ensure_utf8_stdio
@@ -1044,7 +1052,102 @@ class MainWindow(QMainWindow):
                 payload = host.file_in.get_nowait()
             except queue.Empty:
                 break
-            assembler.handle_payload(payload)
+            try:
+                meta, _blob = unpack_file_message(payload)
+            except Exception:
+                log.exception("bad host file payload")
+                continue
+            op = str(meta.get("op") or "chunk")
+            if op == "list":
+                self._handle_remote_list_request(meta)
+            elif op == "download":
+                self._handle_remote_download_request(meta)
+            elif op == "chunk":
+                assembler.handle_payload(payload)
+            else:
+                # Ignore control replies that shouldn't arrive on the host.
+                log.debug("ignore file op on host: %s", op)
+
+    def _handle_remote_list_request(self, meta: dict) -> None:
+        path = str(meta.get("path") or "")
+
+        def worker() -> None:
+            try:
+                resolved, entries = list_directory(path)
+                packet = pack_list_result(resolved, entries)
+            except Exception as exc:
+                log.warning("remote list failed path=%s: %s", path, exc)
+                packet = pack_list_result(path, error=str(exc))
+            try:
+                self._enqueue_host_file(packet)
+            except Exception as exc:
+                log.warning("cannot reply list result: %s", exc)
+
+        # Don't block the Qt UI thread on large folders / slow volumes.
+        threading.Thread(target=worker, name="host-remote-list", daemon=True).start()
+
+    def _handle_remote_download_request(self, meta: dict) -> None:
+        path = str(meta.get("path") or "")
+        if self._file_sending:
+            try:
+                self._enqueue_host_file(
+                    pack_download_error(path, i18n.t("file_transfer_busy"))
+                )
+            except Exception:
+                pass
+            return
+        src = Path(path)
+        if not src.is_file():
+            try:
+                self._enqueue_host_file(
+                    pack_download_error(path, "not a file: %s" % path)
+                )
+            except Exception:
+                pass
+            return
+        if src.stat().st_size > MAX_FILE_BYTES:
+            try:
+                self._enqueue_host_file(
+                    pack_download_error(path, i18n.t("file_too_large", name=src.name))
+                )
+            except Exception:
+                pass
+            return
+
+        self._file_sending = True
+        self._file_send_stop.clear()
+        self._refresh_send_to_controller_button()
+        self._set_status(i18n.t("file_sending", name=src.name, pct=0))
+
+        def worker() -> None:
+            try:
+                send_file(
+                    src,
+                    self._enqueue_host_file,
+                    on_progress=lambda name, done, total: self.file_status.emit(
+                        i18n.t(
+                            "file_sending",
+                            name=name,
+                            pct=(100 if total <= 0 else min(100, int(done * 100 / total))),
+                        )
+                    ),
+                    should_stop=lambda: self._file_send_stop.is_set(),
+                )
+                self.file_status.emit(i18n.t("file_sent", name=src.name))
+            except InterruptedError:
+                self.file_status.emit(i18n.t("file_transfer_failed", error="cancelled"))
+            except Exception as exc:
+                log.exception("remote download failed")
+                try:
+                    self._enqueue_host_file(pack_download_error(path, str(exc)))
+                except Exception:
+                    pass
+                self.file_status.emit(i18n.t("file_transfer_failed", error=str(exc)))
+            finally:
+                self._file_sending = False
+                QTimer.singleShot(0, self._refresh_send_to_controller_button)
+
+        threading.Thread(target=worker, name="host-remote-download", daemon=True).start()
 
     def _stop_host_files(self) -> None:
         self._file_send_stop.set()

@@ -135,6 +135,7 @@ remote/
     client.py               # Qt 远程画面（防闪烁）
     clipboard_sync.py       # 文字/文件剪贴板同步（Ctrl+Alt+C 推送 / Ctrl+Alt+V 拉取）
     file_transfer.py        # 专用远程文件传输（MsgType.FILE，落盘 Downloads/LeafLink）
+    remote_files.py         # 控制端远程文件浏览器（list/download）
   scripts/build.py          # PyInstaller 跨平台打包入口
   scripts/build_windows.ps1
   scripts/build_linux.sh
@@ -179,6 +180,8 @@ CLIPBOARD meta：
 FILE meta（与剪贴板文件通道独立，不经系统剪贴板）：
 
 - 分片：`{"op":"chunk","id","name","size","offset","done"}`，blob 为分片（单文件≤64MiB，块 256KiB）
+- 列目录：控制端 `{"op":"list","path"}` → 被控端 `list_ok` / `list_err`（entries 含 name/path/is_dir/size/mtime）
+- 远程下载：控制端 `{"op":"download","path"}` → 被控端回传 `chunk` 分片（或 `download_err`）
 - 能力协商：HELLO_ACK `features` 含 `"file_transfer"`
 
 坐标使用 **相对屏幕归一化** `[0.0, 1.0]`，避免双方分辨率不一致。  

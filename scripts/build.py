@@ -105,6 +105,7 @@ def _hidden_imports() -> list[str]:
         "remote_desktop.themes",
         "remote_desktop.toggle_switch",
         "remote_desktop.file_transfer",
+        "remote_desktop.remote_files",
         "remote_desktop.qt_bind",
         "remote_desktop.qt_fonts",
         "remote_desktop.i18n",

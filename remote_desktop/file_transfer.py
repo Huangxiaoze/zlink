@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
+import string
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .protocol import pack_file_message, unpack_file_message
 
@@ -16,6 +19,7 @@ log = logging.getLogger(__name__)
 
 MAX_FILE_BYTES = 64 * 1024 * 1024
 CHUNK_SIZE = 256 * 1024
+MAX_LIST_ENTRIES = 400
 FEATURE_FILE_TRANSFER = "file_transfer"
 
 
@@ -39,6 +43,166 @@ def transfer_dir() -> Path:
 def safe_name(name: str) -> str:
     base = os.path.basename(name.replace("\\", "/")).strip() or "file.bin"
     return "".join(ch if ch not in '<>:"|?*' else "_" for ch in base)[:180]
+
+
+def pack_list_request(path: str = "") -> bytes:
+    return pack_file_message({"op": "list", "path": str(path or "")}, b"")
+
+
+def pack_list_result(
+    path: str,
+    entries: list[dict[str, Any]] | None = None,
+    *,
+    error: str = "",
+) -> bytes:
+    if error:
+        return pack_file_message(
+            {"op": "list_err", "path": str(path or ""), "error": str(error)},
+            b"",
+        )
+    return pack_file_message(
+        {
+            "op": "list_ok",
+            "path": str(path or ""),
+            "entries": list(entries or []),
+        },
+        b"",
+    )
+
+
+def pack_download_request(path: str) -> bytes:
+    return pack_file_message({"op": "download", "path": str(path)}, b"")
+
+
+def pack_download_error(path: str, error: str) -> bytes:
+    return pack_file_message(
+        {"op": "download_err", "path": str(path or ""), "error": str(error)},
+        b"",
+    )
+
+
+def _windows_drive_letters() -> list[str]:
+    """Return present drive letters without touching each volume (avoids DVD/network hangs)."""
+    try:
+        import ctypes
+
+        mask = int(ctypes.windll.kernel32.GetLogicalDrives())  # type: ignore[attr-defined]
+    except Exception:
+        # Fallback: only common fixed letters, never probe A: / empty optical drives.
+        return [ch for ch in "CDEFGHIJKLMNOPQRSTUVWXYZ"]
+    letters: list[str] = []
+    for idx, ch in enumerate(string.ascii_uppercase):
+        if mask & (1 << idx):
+            letters.append(ch)
+    return letters
+
+
+def browse_roots() -> list[dict[str, Any]]:
+    """Top-level browse targets on the host OS."""
+    roots: list[dict[str, Any]] = []
+    system = platform.system().lower()
+    if system == "windows":
+        for letter in _windows_drive_letters():
+            roots.append(
+                {
+                    "name": "%s:" % letter,
+                    "path": "%s:\\" % letter,
+                    "is_dir": True,
+                    "size": 0,
+                    "mtime": 0,
+                }
+            )
+    else:
+        roots.append(
+            {
+                "name": "/",
+                "path": "/",
+                "is_dir": True,
+                "size": 0,
+                "mtime": 0,
+            }
+        )
+    home = Path.home()
+    roots.append(
+        {
+            "name": home.name or str(home),
+            "path": str(home),
+            "is_dir": True,
+            "size": 0,
+            "mtime": 0,
+        }
+    )
+    return roots
+
+
+def resolve_browse_path(path: str | None) -> Path:
+    text = (path or "").strip()
+    if not text:
+        return Path.home()
+    return Path(text).expanduser()
+
+
+def list_directory(path: str | None) -> tuple[str, list[dict[str, Any]]]:
+    """List a host directory. Empty path returns browse roots.
+
+    Uses ``os.scandir`` so each entry is typically statted once (much faster than
+    Path.iterdir + is_dir + stat on Windows).
+    """
+    text = (path or "").strip()
+    if not text:
+        return "", browse_roots()
+
+    target = resolve_browse_path(text)
+    try:
+        # Avoid resolve() symlink walk when possible — absolute is enough for browse.
+        if not target.is_absolute():
+            target = target.resolve()
+    except OSError as exc:
+        raise FileNotFoundError(str(exc)) from exc
+    if not target.exists():
+        raise FileNotFoundError(str(target))
+    if not target.is_dir():
+        raise NotADirectoryError(str(target))
+
+    collected: list[tuple[bool, str, dict[str, Any]]] = []
+    try:
+        with os.scandir(str(target)) as it:
+            for entry in it:
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    size = 0
+                    mtime = 0
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                        if not is_dir:
+                            size = int(st.st_size)
+                        mtime = int(st.st_mtime)
+                    except OSError:
+                        pass
+                    collected.append(
+                        (
+                            is_dir,
+                            entry.name.lower(),
+                            {
+                                "name": entry.name,
+                                "path": str(Path(target) / entry.name),
+                                "is_dir": bool(is_dir),
+                                "size": size,
+                                "mtime": mtime,
+                            },
+                        )
+                    )
+                except OSError:
+                    continue
+                # Soft cap while scanning so huge directories don't stall the host.
+                if len(collected) >= MAX_LIST_ENTRIES * 2:
+                    break
+    except OSError as exc:
+        raise PermissionError(str(exc)) from exc
+
+    collected.sort(key=lambda item: (0 if item[0] else 1, item[1]))
+    entries = [item[2] for item in collected[:MAX_LIST_ENTRIES]]
+    return str(target), entries
 
 
 def unique_dest(folder: Path, name: str) -> Path:
