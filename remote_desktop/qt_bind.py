@@ -330,6 +330,48 @@ def dialog_exec(dialog: QDialog) -> int:
     return int(fn())
 
 
+def qt_enum_int(value: Any) -> int:
+    """PySide2 enums often reject implicit int(); normalize for constructors/compare."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raw = getattr(value, "value", None)
+        if raw is not None:
+            return int(raw)
+        return int(getattr(value, "__int__", lambda: value)())
+
+
+def qt_enum_eq(left: Any, right: Any) -> bool:
+    try:
+        return left == right or qt_enum_int(left) == qt_enum_int(right)
+    except (TypeError, ValueError):
+        return False
+
+
+def make_dialog_button_box(*buttons: Any) -> QDialogButtonBox:
+    """Create QDialogButtonBox on both PySide2 and PySide6.
+
+    PySide2 rejects ``QDialogButtonBox(Save | Cancel)`` because the OR result is a
+    StandardButton enum, not a plain int.
+    """
+    flags = 0
+    for button in buttons:
+        flags |= qt_enum_int(button)
+    try:
+        return QDialogButtonBox(flags)
+    except TypeError:
+        std = getattr(QDialogButtonBox, "StandardButtons", None)
+        if std is not None:
+            try:
+                return QDialogButtonBox(std(flags))
+            except TypeError:
+                pass
+        box = QDialogButtonBox()
+        for button in buttons:
+            box.addButton(button)
+        return box
+
+
 def font_db_families() -> list[str]:
     # Qt5: instance method; Qt6: often static.
     try:

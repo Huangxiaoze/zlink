@@ -30,6 +30,7 @@ from .qt_bind import (
     NoFocus,
     PointingHandCursor,
     QApplication,
+    QFrame,
     QHBoxLayout,
     QImage,
     QKeyEvent,
@@ -142,6 +143,9 @@ class RemoteCanvas(QWidget):
         return (px - x) / w, (py - y) / h
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self.host_window is not None:
+            _px, py = event_pos(event)
+            self.host_window._on_canvas_mouse_y(py)
         self._emit_mouse("move", event)
         super().mouseMoveEvent(event)
 
@@ -220,6 +224,49 @@ class RemoteCanvas(QWidget):
         self.on_mouse(action, norm[0], norm[1], extra)
 
 
+class FullscreenDropBar(QFrame):
+    """Top edge pull-down chrome shown only while fullscreen."""
+
+    def __init__(self, parent: QWidget, on_exit: Callable[[], None], on_hover: Callable[[bool], None]) -> None:
+        super().__init__(parent)
+        self._on_hover = on_hover
+        self.setObjectName("fsDropBar")
+        self.setStyleSheet(
+            "#fsDropBar {"
+            "  background: rgba(15, 22, 30, 235);"
+            "  border: none;"
+            "  border-bottom-left-radius: 10px;"
+            "  border-bottom-right-radius: 10px;"
+            "}"
+            "#fsDropBar QPushButton {"
+            "  color: #E8FFF4; background: rgba(255,255,255,18);"
+            "  border: 1px solid rgba(125,255,206,120); border-radius: 6px;"
+            "  padding: 6px 16px; font-size: 12px; font-weight: 600;"
+            "}"
+            "#fsDropBar QPushButton:hover {"
+            "  background: rgba(125,255,206,40); color: #FFFFFF;"
+            "}"
+        )
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 8, 16, 10)
+        lay.addStretch(1)
+        self.btn_exit = QPushButton(i18n.t("viewer_exit_fullscreen"))
+        self.btn_exit.setCursor(PointingHandCursor)
+        self.btn_exit.setFocusPolicy(NoFocus)
+        self.btn_exit.clicked.connect(on_exit)
+        lay.addWidget(self.btn_exit)
+        lay.addStretch(1)
+        self.hide()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._on_hover(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._on_hover(False)
+        super().leaveEvent(event)
+
+
 class RemoteClientWindow(QMainWindow):
     def __init__(self, config: ClientConfig, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -236,16 +283,18 @@ class RemoteClientWindow(QMainWindow):
         self._clip: Optional[ClipboardBridge] = None
         self._base_title = config.window_title
         self._swallow_esc_up = False
+        self._fs_edge_px = 10
+        self._fs_drop_hover = False
 
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
 
-        central = QWidget()
-        layout = QVBoxLayout(central)
+        self._central = QWidget()
+        layout = QVBoxLayout(self._central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Toolbar sits ABOVE the remote picture so controls never cover it.
+        # Windowed-mode toolbar (hidden while fullscreen).
         self.toolbar = QWidget()
         self.toolbar.setObjectName("viewerToolbar")
         self.toolbar.setFixedHeight(36)
@@ -276,7 +325,17 @@ class RemoteClientWindow(QMainWindow):
         self.canvas.on_before_remote_paste = self._before_remote_paste
         self.canvas.on_local_key = self._handle_local_key
         layout.addWidget(self.canvas, 1)
-        self.setCentralWidget(central)
+        self.setCentralWidget(self._central)
+
+        # Fullscreen-only top drop-down (overlay; not in the layout).
+        self.fs_drop = FullscreenDropBar(
+            self._central,
+            on_exit=lambda: self._set_fullscreen(False),
+            on_hover=self._on_fs_drop_hover,
+        )
+        self._fs_hide_timer = QTimer(self)
+        self._fs_hide_timer.setSingleShot(True)
+        self._fs_hide_timer.timeout.connect(self._hide_fs_drop)
 
         self._bus.frame_jpeg.connect(self._on_frame_jpeg)
         self._bus.status.connect(self._on_status)
@@ -329,12 +388,50 @@ class RemoteClientWindow(QMainWindow):
     def _set_fullscreen(self, enabled: bool) -> None:
         if enabled:
             self.showFullScreen()
-            self.btn_fullscreen.setText(i18n.t("viewer_exit_fullscreen"))
+            self.toolbar.hide()
+            self._hide_fs_drop()
         else:
+            self._hide_fs_drop()
             self.showNormal()
+            self.toolbar.show()
             self.btn_fullscreen.setText(i18n.t("viewer_fullscreen"))
-        # Return keyboard focus to the remote surface after chrome clicks.
         self.canvas.setFocus(MouseFocusReason)
+
+    def _on_canvas_mouse_y(self, y: float) -> None:
+        if not self.isFullScreen():
+            return
+        if y <= self._fs_edge_px:
+            self._show_fs_drop()
+        elif not self._fs_drop_hover and y > self.fs_drop.height() + 8:
+            self._fs_hide_timer.start(280)
+
+    def _on_fs_drop_hover(self, hovering: bool) -> None:
+        self._fs_drop_hover = hovering
+        if hovering:
+            self._fs_hide_timer.stop()
+            self._show_fs_drop()
+        else:
+            self._fs_hide_timer.start(350)
+
+    def _show_fs_drop(self) -> None:
+        if not self.isFullScreen():
+            return
+        self._fs_hide_timer.stop()
+        self.fs_drop.btn_exit.setText(i18n.t("viewer_exit_fullscreen"))
+        w = max(1, self._central.width())
+        self.fs_drop.setGeometry(0, 0, w, 48)
+        self.fs_drop.raise_()
+        self.fs_drop.show()
+
+    def _hide_fs_drop(self) -> None:
+        self._fs_hide_timer.stop()
+        self._fs_drop_hover = False
+        self.fs_drop.hide()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self.isFullScreen() and self.fs_drop.isVisible():
+            self._show_fs_drop()
 
     def start(self) -> None:
         self._stop.clear()

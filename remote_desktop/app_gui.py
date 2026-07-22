@@ -16,7 +16,6 @@ from .qt_bind import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -37,6 +36,8 @@ from .qt_bind import (
     WA_DeleteOnClose,
     Yes,
     dialog_exec,
+    make_dialog_button_box,
+    qt_enum_eq,
 )
 
 from .client import RemoteClientWindow
@@ -178,7 +179,7 @@ class DeviceDialog(QDialog):
         form.addRow(i18n.t("field_password"), self.password)
         form.addRow(i18n.t("field_notes"), self.notes)
 
-        buttons = QDialogButtonBox(Save | Cancel)
+        buttons = make_dialog_button_box(Save, Cancel)
         buttons.button(Save).setText(i18n.t("save"))
         buttons.button(Cancel).setText(i18n.t("cancel"))
         buttons.button(Save).setObjectName("primary")
@@ -267,7 +268,7 @@ class SettingsDialog(QDialog):
         hint.setWordWrap(True)
         form.addRow(hint)
 
-        buttons = QDialogButtonBox(Save | Cancel)
+        buttons = make_dialog_button_box(Save, Cancel)
         buttons.button(Save).setText(i18n.t("save"))
         buttons.button(Cancel).setText(i18n.t("cancel"))
         buttons.button(Save).setObjectName("primary")
@@ -680,7 +681,7 @@ class MainWindow(QMainWindow):
 
     def _add_device(self) -> None:
         dialog = DeviceDialog(self, i18n.t("add_title"))
-        if dialog_exec(dialog) == DialogAccepted and dialog.result_device:
+        if qt_enum_eq(dialog_exec(dialog), DialogAccepted) and dialog.result_device:
             self.store.upsert(dialog.result_device)
             self._selected_device_id = dialog.result_device.id
             self._reload_devices()
@@ -693,7 +694,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, i18n.t("tip"), i18n.t("select_device"))
             return
         dialog = DeviceDialog(self, i18n.t("edit_title"), device)
-        if dialog_exec(dialog) == DialogAccepted and dialog.result_device:
+        if qt_enum_eq(dialog_exec(dialog), DialogAccepted) and dialog.result_device:
             self.store.upsert(dialog.result_device)
             self._selected_device_id = dialog.result_device.id
             self._reload_devices()
@@ -704,13 +705,13 @@ class MainWindow(QMainWindow):
         if not device:
             QMessageBox.information(self, i18n.t("tip"), i18n.t("select_device"))
             return
-        if (
+        if not qt_enum_eq(
             QMessageBox.question(
                 self,
                 i18n.t("confirm"),
                 i18n.t("delete_confirm", name=device.name),
-            )
-            != Yes
+            ),
+            Yes,
         ):
             return
         self.store.remove(device.id)
@@ -721,7 +722,7 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self, self.store)
-        if dialog_exec(dialog) != DialogAccepted:
+        if not qt_enum_eq(dialog_exec(dialog), DialogAccepted):
             return
         i18n.set_lang(self.store.settings.language)
         apply_theme(QApplication.instance(), self.store.settings.theme)
@@ -888,9 +889,9 @@ class MainWindow(QMainWindow):
         )
         if not ok:
             return
-        save = (
-            QMessageBox.question(self, i18n.t("quick_connect"), i18n.t("quick_save"))
-            == Yes
+        save = qt_enum_eq(
+            QMessageBox.question(self, i18n.t("quick_connect"), i18n.t("quick_save")),
+            Yes,
         )
         device_id = None
         if save:
