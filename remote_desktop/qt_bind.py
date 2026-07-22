@@ -411,6 +411,30 @@ def qt_enum_eq(left: Any, right: Any) -> bool:
         return False
 
 
+def make_window_flags(*flags: Any) -> Any:
+    """Combine window flags for ``setWindowFlags`` on PySide2 and PySide6.
+
+    PySide2 often cannot ``|`` WindowType enums directly, and also rejects a plain
+    ``int`` — ``setWindowFlags`` expects ``Qt.WindowFlags``.
+    """
+    value = 0
+    for flag in flags:
+        value |= qt_enum_int(flag)
+    window_flags = getattr(Qt, "WindowFlags", None)
+    if window_flags is not None:
+        try:
+            return window_flags(value)
+        except TypeError:
+            pass
+    try:
+        result = flags[0]
+        for flag in flags[1:]:
+            result = result | flag
+        return result
+    except TypeError:
+        return value
+
+
 def make_dialog_button_box(*buttons: Any) -> QDialogButtonBox:
     """Create QDialogButtonBox on both PySide2 and PySide6.
 

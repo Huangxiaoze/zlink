@@ -24,8 +24,8 @@ from .qt_bind import (
     QWidget,
     WA_StyledBackground,
     dialog_exec,
+    make_window_flags,
     qt_enum_eq,
-    qt_enum_int,
 )
 
 
@@ -45,9 +45,8 @@ def _global_pos(event):
 
 def _make_frameless(dialog: QDialog) -> None:
     """Drop the native Windows title bar; use in-dialog chrome instead."""
-    # PySide2 rejects WindowType | WindowType; pass a plain int like dialog button flags.
-    flags = qt_enum_int(DialogWindow) | qt_enum_int(FramelessWindowHint)
-    dialog.setWindowFlags(flags)
+    # PySide2 needs Qt.WindowFlags(...), not enum|enum or a plain int.
+    dialog.setWindowFlags(make_window_flags(DialogWindow, FramelessWindowHint))
     dialog.setAttribute(WA_StyledBackground, True)
     dialog.setModal(True)
 
