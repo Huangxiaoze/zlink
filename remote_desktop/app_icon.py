@@ -9,7 +9,7 @@ from typing import Iterable, Optional
 from .qt_bind import KeepAspectRatio, QIcon, QPixmap, SmoothTransformation
 
 _ICON: Optional[QIcon] = None
-_PNG_NAME = "favio.png"
+_PNG_NAME = "app.png"
 _ICO_NAME = "app.ico"
 
 

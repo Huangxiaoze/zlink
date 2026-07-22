@@ -27,6 +27,7 @@ from .qt_bind import (
     make_window_flags,
     qt_enum_eq,
 )
+from .toggle_switch import ToggleSwitch
 
 
 def _polish(*widgets: QWidget) -> None:
@@ -388,11 +389,19 @@ class QuickConnectDialog(QDialog):
         self.edit_password.setEchoMode(Password)
         body_l.addWidget(self.edit_password)
 
-        self.chk_save = QCheckBox(i18n.t("quick_save"))
-        self.chk_save.setObjectName("confirmCheck")
+        save_row = QHBoxLayout()
+        save_row.setSpacing(10)
+        self.lbl_save = QLabel(i18n.t("quick_save"))
+        self.lbl_save.setObjectName("confirmCheck")
+        self.lbl_save.setCursor(PointingHandCursor)
+        self.chk_save = ToggleSwitch()
         self.chk_save.setChecked(True)
-        self.chk_save.setCursor(PointingHandCursor)
-        body_l.addWidget(self.chk_save)
+        self.lbl_save.mousePressEvent = (  # type: ignore[method-assign]
+            lambda event: self.chk_save.toggle()
+        )
+        save_row.addWidget(self.lbl_save, 1)
+        save_row.addWidget(self.chk_save, 0)
+        body_l.addLayout(save_row)
         root.addWidget(body)
 
         footer = QFrame()

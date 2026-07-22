@@ -17,3 +17,4 @@ fi
 
 echo ""
 echo "Output: dist/LeafLink/LeafLink"
+echo "Tip   : for an installable .deb, run: bash scripts/build_deb.sh"

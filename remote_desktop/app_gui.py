@@ -8,7 +8,6 @@ import time
 from .qt_bind import (
     AA_DontShowIconsInMenus,
     AlignCenter,
-    Antialiasing,
     Cancel,
     CustomContextMenu,
     DialogAccepted,
@@ -16,13 +15,10 @@ from .qt_bind import (
     HoverEnter,
     HoverLeave,
     NoFocus,
-    NoPen,
     Password,
     PointingHandCursor,
-    QAbstractButton,
     QAction,
     QApplication,
-    QColor,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -33,7 +29,6 @@ from .qt_bind import (
     QLineEdit,
     QMainWindow,
     QMenu,
-    QPainter,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -76,6 +71,7 @@ from .themes import (
     set_current_theme,
     theme_ids,
 )
+from .toggle_switch import ToggleSwitch
 
 log = logging.getLogger(__name__)
 
@@ -97,37 +93,6 @@ def _status_style(status_key: str) -> tuple[str, str]:
     if status_key == "offline":
         return i18n.t("offline"), "color:%s; background:%s;" % (THEME.offline, THEME.offline_bg)
     return i18n.t("unknown"), "color:%s; background:%s;" % (THEME.muted, THEME.unknown_bg)
-
-
-class ToggleSwitch(QAbstractButton):
-    """Compact pill switch for the dark side rail."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setCheckable(True)
-        self.setCursor(PointingHandCursor)
-        self.setFocusPolicy(NoFocus)
-        self.setFixedSize(46, 26)
-
-    def paintEvent(self, _event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.setRenderHint(Antialiasing, True)
-        checked = self.isChecked()
-        track = QColor(THEME.accent if checked else THEME.side_line)
-        thumb = QColor("#FFFFFF")
-        if not self.isEnabled():
-            track = QColor(THEME.side_line)
-            thumb = QColor("#C8D0D6")
-
-        painter.setPen(NoPen)
-        painter.setBrush(track)
-        painter.drawRoundedRect(0, 0, self.width(), self.height(), 13, 13)
-
-        margin = 3
-        diameter = self.height() - margin * 2
-        x = self.width() - margin - diameter if checked else margin
-        painter.setBrush(thumb)
-        painter.drawEllipse(x, margin, diameter, diameter)
 
 
 class DeviceCard(QFrame):

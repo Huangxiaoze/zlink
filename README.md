@@ -73,14 +73,15 @@ python main.py client --host <IP> --password <code>
 
 主题：设置 → 主题（浅色 / 深色 / 森绿），立即生效并写入本地配置。
 
-## 打包可执行文件 / Windows 安装包
+## 打包可执行文件 / 安装包
 
 在**目标平台本机**打包（PyInstaller 交叉编译 Qt 应用不可靠）：
 
 | 平台 | 脚本 |
 |------|------|
 | Windows | `powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1` |
-| Linux | `bash scripts/build_linux.sh` |
+| Linux（二进制） | `bash scripts/build_linux.sh` |
+| Ubuntu/Debian（`.deb`） | `bash scripts/build_deb.sh` |
 | macOS | `bash scripts/build_macos.sh` |
 
 ### Windows 安装包（推荐）
@@ -111,6 +112,41 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -NoInstaller
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1 -NoInstaller -OneFile
 ```
 
+### Ubuntu / Debian 安装包（`.deb`）
+
+在 Ubuntu 本机执行（推荐与目标系统同版本，例如 18.04）：
+
+```bash
+sudo apt update
+sudo apt install -y dpkg-dev python3-venv
+# 若按上文装过运行依赖，可跳过；打包机仍需 Qt/X11 相关库
+
+bash scripts/build_deb.sh
+```
+
+产物：
+
+1. 应用目录：`dist/LeafLink/LeafLink`
+2. 安装包：`dist/leaflink_<version>_<arch>.deb`
+
+安装 / 卸载：
+
+```bash
+sudo apt install ./dist/leaflink_*.deb
+# 或
+sudo dpkg -i ./dist/leaflink_*.deb && sudo apt-get install -f -y
+
+sudo apt remove leaflink
+```
+
+安装后可从应用菜单启动 **LeafLink**，或命令行运行 `leaflink`。  
+若已有 `dist/LeafLink`、只想重打 deb：
+
+```bash
+DEB_ONLY=1 bash scripts/build_deb.sh
+# 等价：python scripts/build.py --deb-only
+```
+
 ### 通用入口
 
 ```bash
@@ -118,6 +154,8 @@ pip install -r requirements.txt -r requirements-build.txt
 python scripts/build.py --clean
 # Windows 安装包：
 python scripts/build.py --clean --installer
+# Ubuntu/Debian 安装包：
+python scripts/build.py --clean --deb
 ```
 
 调试 CLI 可加 `--console` 保留终端窗口。

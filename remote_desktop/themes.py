@@ -869,6 +869,11 @@ QCheckBox#confirmCheck {{
     font-size: 13px;
     font-weight: 600;
 }}
+QLabel#confirmCheck {{
+    color: {c.text};
+    font-size: 13px;
+    font-weight: 600;
+}}
 QFrame#confirmFooter {{
     background: transparent;
     border-top: 1px solid {c.line};

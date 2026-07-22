@@ -7,6 +7,7 @@ Usage (from repo root `remote/`):
   python scripts/build.py --clean
   python scripts/build.py --onefile          # single portable exe (slower start)
   python scripts/build.py --installer        # Windows: also build Setup.exe (Inno Setup)
+  python scripts/build.py --deb              # Linux: also build .deb package
 """
 
 from __future__ import annotations
@@ -15,8 +16,10 @@ import argparse
 import os
 import platform
 import shutil
+import stat
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,9 +27,11 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 SCRIPTS = ROOT / "scripts"
 NAME = "LeafLink"
+PKG_NAME = "leaflink"
 ISS = SCRIPTS / "windows" / "leaflink.iss"
-ICON_PNG = ROOT / "resources" / "icon" / "favio.png"
+ICON_PNG = ROOT / "resources" / "icon" / "app.png"
 ICON_ICO = ROOT / "resources" / "icon" / "app.ico"
+OPT_DIR = "/opt/%s" % PKG_NAME
 
 
 def _app_version() -> str:
@@ -39,7 +44,7 @@ def _app_version() -> str:
 
 
 def _ensure_app_ico() -> Path | None:
-    """Build a multi-size .ico from favio.png for Windows exe / installer."""
+    """Build a multi-size .ico from app.png for Windows exe / installer."""
     if not ICON_PNG.is_file():
         print("WARNING: app icon PNG missing:", ICON_PNG, file=sys.stderr)
         return ICON_ICO if ICON_ICO.is_file() else None
@@ -98,6 +103,7 @@ def _hidden_imports() -> list[str]:
         "remote_desktop.app_icon",
         "remote_desktop.window_chrome",
         "remote_desktop.themes",
+        "remote_desktop.toggle_switch",
         "remote_desktop.qt_bind",
         "remote_desktop.qt_fonts",
         "remote_desktop.i18n",
@@ -189,8 +195,211 @@ def _build_installer(version: str) -> int:
     return 0
 
 
+def _deb_arch() -> str:
+    machine = platform.machine().lower()
+    return {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+        "armv7l": "armhf",
+        "armv6l": "armhf",
+        "i686": "i386",
+        "i386": "i386",
+    }.get(machine, machine)
+
+
+def _write_text(path: Path, text: str, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    path.chmod(mode)
+
+
+def _dir_size_kb(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            fp = Path(root) / name
+            try:
+                total += fp.stat().st_size
+            except OSError:
+                pass
+    return max(1, (total + 1023) // 1024)
+
+
+def _build_deb(version: str) -> int:
+    """Assemble a Debian package from the PyInstaller onedir tree."""
+    if shutil.which("dpkg-deb") is None:
+        print("ERROR: dpkg-deb not found. Install packaging tools:", file=sys.stderr)
+        print("  sudo apt install -y dpkg-dev", file=sys.stderr)
+        return 2
+
+    app_dir = DIST / NAME
+    binary = app_dir / NAME
+    if not binary.is_file():
+        print("ERROR: missing PyInstaller output:", binary, file=sys.stderr)
+        print("Build the Linux onedir first (without --onefile).", file=sys.stderr)
+        return 1
+
+    arch = _deb_arch()
+    stage = DIST / ("deb-root-%s" % PKG_NAME)
+    if stage.exists():
+        shutil.rmtree(stage)
+
+    opt = stage / "opt" / PKG_NAME
+    bin_dir = stage / "usr" / "bin"
+    apps = stage / "usr" / "share" / "applications"
+    pixmaps = stage / "usr" / "share" / "pixmaps"
+    icons = stage / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps"
+    doc = stage / "usr" / "share" / "doc" / PKG_NAME
+    debian = stage / "DEBIAN"
+
+    shutil.copytree(app_dir, opt, symlinks=True)
+    # Ensure the main binary is executable after copy.
+    binary_dst = opt / NAME
+    binary_dst.chmod(binary_dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    _write_text(
+        bin_dir / PKG_NAME,
+        textwrap.dedent(
+            """\
+            #!/bin/sh
+            exec %s/%s "$@"
+            """
+            % (OPT_DIR, NAME)
+        ),
+        mode=0o755,
+    )
+
+    _write_text(
+        apps / ("%s.desktop" % PKG_NAME),
+        textwrap.dedent(
+            """\
+            [Desktop Entry]
+            Type=Application
+            Version=1.0
+            Name=%s
+            GenericName=Remote Desktop
+            Comment=Cross-platform remote desktop (host + client)
+            Exec=%s
+            Icon=%s
+            Terminal=false
+            Categories=Network;RemoteAccess;
+            StartupNotify=true
+            """
+            % (NAME, PKG_NAME, PKG_NAME)
+        ),
+    )
+
+    if ICON_PNG.is_file():
+        icons.mkdir(parents=True, exist_ok=True)
+        pixmaps.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ICON_PNG, icons / ("%s.png" % PKG_NAME))
+        shutil.copy2(ICON_PNG, pixmaps / ("%s.png" % PKG_NAME))
+
+    _write_text(
+        doc / "copyright",
+        textwrap.dedent(
+            """\
+            Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+            Upstream-Name: %s
+            Source: https://github.com/Huangxiaoze/remote_desktop
+
+            Files: *
+            Copyright: LeafLink contributors
+            License: Proprietary
+             See the upstream repository for license terms.
+            """
+            % NAME
+        ),
+    )
+
+    installed_size = _dir_size_kb(stage)
+    control = textwrap.dedent(
+        """\
+        Package: %s
+        Version: %s
+        Section: net
+        Priority: optional
+        Architecture: %s
+        Maintainer: LeafLink Maintainers <leaflink@users.noreply.github.com>
+        Installed-Size: %d
+        Depends: libc6, libx11-6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libxcb-xinerama0, libglib2.0-0, libdbus-1-3, libfontconfig1, libfreetype6, libxrender1, libxi6, libsm6, libice6, libgl1 | libgl1-mesa-glx
+        Recommends: fonts-noto-cjk | fonts-wqy-microhei
+        Homepage: https://github.com/Huangxiaoze/remote_desktop
+        Description: Cross-platform remote desktop (host + client)
+         LeafLink provides a Qt device-manager GUI for hosting and
+         controlling remote desktops over a direct TCP connection.
+        """
+        % (PKG_NAME, version, arch, installed_size)
+    )
+    _write_text(debian / "control", control)
+
+    _write_text(
+        debian / "postinst",
+        textwrap.dedent(
+            """\
+            #!/bin/sh
+            set -e
+            if command -v update-desktop-database >/dev/null 2>&1; then
+              update-desktop-database -q /usr/share/applications || true
+            fi
+            if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+              gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true
+            fi
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+    _write_text(
+        debian / "postrm",
+        textwrap.dedent(
+            """\
+            #!/bin/sh
+            set -e
+            if [ "$1" = remove ] || [ "$1" = purge ]; then
+              if command -v update-desktop-database >/dev/null 2>&1; then
+                update-desktop-database -q /usr/share/applications || true
+              fi
+              if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+                gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true
+              fi
+            fi
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+
+    deb_name = "%s_%s_%s.deb" % (PKG_NAME, version, arch)
+    deb_path = DIST / deb_name
+    if deb_path.exists():
+        deb_path.unlink()
+
+    cmd = ["dpkg-deb", "--root-owner-group", "-Zxz", "-b", str(stage), str(deb_path)]
+    print("Running :", " ".join(cmd))
+    print()
+    proc = subprocess.run(cmd, cwd=str(ROOT))
+    if proc.returncode != 0:
+        # Older dpkg-deb (Ubuntu 18.04) may lack --root-owner-group.
+        if "--root-owner-group" in cmd:
+            cmd = ["dpkg-deb", "-Zxz", "-b", str(stage), str(deb_path)]
+            print("Retrying without --root-owner-group ...")
+            proc = subprocess.run(cmd, cwd=str(ROOT))
+        if proc.returncode != 0:
+            return proc.returncode
+
+    print("OK — Debian package:", deb_path)
+    print("Install with: sudo apt install ./%s" % deb_path.name)
+    print("          or: sudo dpkg -i %s && sudo apt-get install -f -y" % deb_path)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build LeafLink executable / Windows installer")
+    parser = argparse.ArgumentParser(
+        description="Build LeafLink executable / Windows installer / Ubuntu .deb"
+    )
     parser.add_argument(
         "--console",
         action="store_true",
@@ -200,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--onefile",
         action="store_true",
-        help="single-file portable exe (slower startup; installer still uses onedir)",
+        help="single-file portable exe (slower startup; installer/deb still use onedir)",
     )
     parser.add_argument(
         "--installer",
@@ -212,6 +421,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Windows only: skip PyInstaller and only compile the Inno Setup script",
     )
+    parser.add_argument(
+        "--deb",
+        action="store_true",
+        help="Linux only: build a .deb package after PyInstaller",
+    )
+    parser.add_argument(
+        "--deb-only",
+        action="store_true",
+        help="Linux only: skip PyInstaller and only assemble .deb from dist/LeafLink",
+    )
     args = parser.parse_args(argv)
 
     version = _app_version()
@@ -222,9 +441,17 @@ def main(argv: list[str] | None = None) -> int:
             print("ERROR: --installer is only supported on Windows.", file=sys.stderr)
             return 1
 
+    if args.deb or args.deb_only:
+        if system != "linux":
+            print("ERROR: --deb is only supported on Linux.", file=sys.stderr)
+            return 1
+
     if args.installer_only:
         _ensure_app_ico()
         return _build_installer(version)
+
+    if args.deb_only:
+        return _build_deb(version)
 
     try:
         import PyInstaller  # noqa: F401
@@ -238,8 +465,8 @@ def main(argv: list[str] | None = None) -> int:
             if path.exists():
                 shutil.rmtree(path, ignore_errors=True)
 
-    # Installer packaging needs the onedir tree; --onefile is for portable builds only.
-    use_onefile = bool(args.onefile) and not args.installer
+    # Installer / deb packaging needs the onedir tree; --onefile is portable-only.
+    use_onefile = bool(args.onefile) and not args.installer and not args.deb
     icon_ico = _ensure_app_ico()
 
     cmd = [
@@ -297,6 +524,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.installer:
         print()
         return _build_installer(version)
+    if args.deb:
+        print()
+        return _build_deb(version)
     return 0
 
 
