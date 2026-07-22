@@ -657,26 +657,36 @@ class RemoteClientWindow(QMainWindow):
             raise ConnectionError("not connected")
         conn.send_raw(packet)
 
-    def _pick_and_send_file(self) -> None:
+    def has_live_session(self) -> bool:
+        conn = self._conn
+        return conn is not None and not conn.closed
+
+    def can_send_file(self) -> bool:
+        """True when this viewer has a live session that supports FILE transfer."""
+        return (
+            self.has_live_session()
+            and FEATURE_FILE_TRANSFER in self._features
+            and not self._file_sending
+        )
+
+    def send_local_file(self, path: Path | str) -> bool:
+        """Send a local file to the remote host. Returns False if rejected."""
         if FEATURE_FILE_TRANSFER not in self._features:
             show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_unsupported"))
-            return
+            return False
         if self._file_sending:
             show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_busy"))
-            return
-        path, _filter = QFileDialog.getOpenFileName(self, i18n.t("send_file_pick"), str(Path.home()))
-        if not path:
-            return
+            return False
         src = Path(path)
         if not src.is_file():
-            return
+            return False
         if src.stat().st_size > MAX_FILE_BYTES:
             show_warning(
                 self,
                 title=i18n.t("tip"),
                 message=i18n.t("file_too_large", name=src.name),
             )
-            return
+            return False
 
         self._file_sending = True
         self._file_send_stop.clear()
@@ -709,10 +719,22 @@ class RemoteClientWindow(QMainWindow):
                 QTimer.singleShot(0, self._refresh_send_button)
 
         threading.Thread(target=worker, name="client-file-send", daemon=True).start()
+        return True
+
+    def _pick_and_send_file(self) -> None:
+        if FEATURE_FILE_TRANSFER not in self._features:
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_unsupported"))
+            return
+        if self._file_sending:
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_busy"))
+            return
+        path, _filter = QFileDialog.getOpenFileName(self, i18n.t("send_file_pick"), str(Path.home()))
+        if not path:
+            return
+        self.send_local_file(path)
 
     def _refresh_send_button(self) -> None:
-        can_send = FEATURE_FILE_TRANSFER in self._features and not self._file_sending
-        self.chrome_bar.btn_send.setEnabled(can_send)
+        self.chrome_bar.btn_send.setEnabled(self.can_send_file())
 
     def _heartbeat_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         interval = self.config.net.heartbeat_interval_s
