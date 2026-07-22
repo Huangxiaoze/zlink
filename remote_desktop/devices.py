@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import socket
 import sys
 import tempfile
@@ -11,7 +12,61 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import PROTOCOL_VERSION
 from .config import DEFAULT_PORT
+
+
+def detect_os_label() -> str:
+    """Short OS category for device cards: Windows / macOS / Ubuntu / …"""
+    system = platform.system()
+    if system == "Windows":
+        return "Windows"
+    if system == "Darwin":
+        return "macOS"
+    if system == "Linux":
+        return _linux_distro_label()
+    return system or ""
+
+
+def _linux_distro_label() -> str:
+    try:
+        text = Path("/etc/os-release").read_text(encoding="utf-8")
+    except OSError:
+        return "Linux"
+    data: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key] = value.strip().strip('"')
+    distro_id = (data.get("ID") or "").lower()
+    mapping = {
+        "ubuntu": "Ubuntu",
+        "debian": "Debian",
+        "fedora": "Fedora",
+        "arch": "Arch",
+        "centos": "CentOS",
+        "rhel": "RHEL",
+        "opensuse": "openSUSE",
+        "opensuse-leap": "openSUSE",
+        "opensuse-tumbleweed": "openSUSE",
+        "linuxmint": "Linux Mint",
+        "kali": "Kali",
+        "raspbian": "Raspberry Pi OS",
+        "raspberrypi": "Raspberry Pi OS",
+        "pop": "Pop!_OS",
+        "elementary": "elementary OS",
+        "manjaro": "Manjaro",
+    }
+    if distro_id in mapping:
+        return mapping[distro_id]
+    for like in (data.get("ID_LIKE") or "").lower().split():
+        if like in mapping:
+            return mapping[like]
+    pretty = (data.get("NAME") or data.get("PRETTY_NAME") or "").strip()
+    if pretty:
+        return pretty.split()[0][:32]
+    return "Linux"
 
 
 def app_data_dir() -> Path:
@@ -34,6 +89,7 @@ class Device:
     port: int = DEFAULT_PORT
     password: str = ""
     notes: str = ""
+    os_name: str = ""
     last_connected: float | None = None
     created_at: float = field(default_factory=time.time)
 
@@ -44,6 +100,7 @@ class Device:
         port: int = DEFAULT_PORT,
         password: str = "",
         notes: str = "",
+        os_name: str = "",
     ) -> Device:
         return Device(
             id=uuid.uuid4().hex,
@@ -52,6 +109,7 @@ class Device:
             port=DEFAULT_PORT,
             password=password,
             notes=notes.strip(),
+            os_name=(os_name or "").strip(),
         )
 
 
@@ -137,6 +195,7 @@ class DeviceStore:
                         port=DEFAULT_PORT,
                         password=str(item.get("password") or ""),
                         notes=str(item.get("notes") or ""),
+                        os_name=str(item.get("os_name") or ""),
                         last_connected=item.get("last_connected"),
                         created_at=float(item.get("created_at") or time.time()),
                     )
@@ -220,12 +279,41 @@ def list_local_ipv4() -> list[str]:
     return ips or ["127.0.0.1"]
 
 
-def probe_online(host: str, port: int, timeout_s: float = 0.8) -> bool:
+def probe_device(host: str, port: int, timeout_s: float = 0.8) -> tuple[bool, str]:
+    """Probe host liveness and read OS label from HELLO_ACK (no auth required)."""
+    from .net import connect_to
+    from .protocol import MsgType, decode_json
+
+    conn = None
     try:
-        with socket.create_connection((host, int(port)), timeout=timeout_s):
-            return True
-    except OSError:
-        return False
+        conn = connect_to(str(host), int(port), float(timeout_s), 64 * 1024)
+        conn.send_json(
+            MsgType.HELLO,
+            {
+                "role": "probe",
+                "version": PROTOCOL_VERSION,
+                "password": "",
+            },
+        )
+        frame = conn.recv_frame()
+        if int(frame.type) != int(MsgType.HELLO_ACK):
+            return True, ""
+        ack = decode_json(frame.payload)
+        os_name = str(ack.get("os") or "").strip()
+        return True, os_name
+    except Exception:
+        return False, ""
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def probe_online(host: str, port: int, timeout_s: float = 0.8) -> bool:
+    online, _os_name = probe_device(host, port, timeout_s=timeout_s)
+    return online
 
 
 def make_device_code() -> str:

@@ -845,6 +845,15 @@ QLabel#cardStatus {{
     padding: 2px 8px;
     border-radius: 8px;
 }}
+QLabel#cardOs {{
+    color: {c.muted};
+    background: {c.card_tile};
+    border: 1px solid {c.line};
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 8px;
+}}
 QWidget#deviceEmptyHost {{
     background: transparent;
 }}

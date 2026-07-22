@@ -50,7 +50,7 @@ from .qt_bind import (
 from .client import RemoteClientWindow
 from .clipboard_sync import ClipboardBridge
 from .config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamConfig
-from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_online
+from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_device
 from .file_transfer import (
     FileAssembler,
     MAX_FILE_BYTES,
@@ -99,11 +99,21 @@ def apply_theme(app: QApplication | None, theme_id: str | None) -> ThemeColors:
 
 
 def _status_style(status_key: str) -> tuple[str, str]:
+    # Solid status dot shares the badge text color (online / offline / unknown).
     if status_key == "online":
-        return i18n.t("online"), "color:%s; background:%s;" % (THEME.online, THEME.online_bg)
+        return "● %s" % i18n.t("online"), "color:%s; background:%s;" % (
+            THEME.online,
+            THEME.online_bg,
+        )
     if status_key == "offline":
-        return i18n.t("offline"), "color:%s; background:%s;" % (THEME.offline, THEME.offline_bg)
-    return i18n.t("unknown"), "color:%s; background:%s;" % (THEME.muted, THEME.unknown_bg)
+        return "● %s" % i18n.t("offline"), "color:%s; background:%s;" % (
+            THEME.offline,
+            THEME.offline_bg,
+        )
+    return "● %s" % i18n.t("unknown"), "color:%s; background:%s;" % (
+        THEME.muted,
+        THEME.unknown_bg,
+    )
 
 
 class DeviceCard(QFrame):
@@ -133,9 +143,12 @@ class DeviceCard(QFrame):
         top = QHBoxLayout()
         self.lbl_status = QLabel()
         self.lbl_status.setObjectName("cardStatus")
+        self.lbl_os = QLabel()
+        self.lbl_os.setObjectName("cardOs")
         self.lbl_last = QLabel()
         self.lbl_last.setObjectName("cardMeta")
         top.addWidget(self.lbl_status, 0)
+        top.addWidget(self.lbl_os, 0)
         top.addStretch(1)
         top.addWidget(self.lbl_last, 0)
 
@@ -181,6 +194,13 @@ class DeviceCard(QFrame):
         status_text, status_qss = _status_style(status_key)
         self.lbl_status.setText(status_text)
         self.lbl_status.setStyleSheet(status_qss)
+        os_name = (device.os_name or "").strip()
+        if os_name:
+            self.lbl_os.setText(os_name)
+            self.lbl_os.setVisible(True)
+        else:
+            self.lbl_os.setText(i18n.t("os_unknown"))
+            self.lbl_os.setVisible(True)
         if device.last_connected:
             self.lbl_last.setText(i18n.t("last_connected", time=_fmt_time(device.last_connected)))
         else:
@@ -259,6 +279,7 @@ class DeviceDialog(QDialog):
                 port=DEFAULT_PORT,
                 password=self.password.text(),
                 notes=self.notes.text().strip(),
+                os_name=self._device.os_name,
                 last_connected=self._device.last_connected,
                 created_at=self._device.created_at,
             )
@@ -723,7 +744,7 @@ class MainWindow(QMainWindow):
         keyword = self.search.text().strip().lower()
         rows: list[Device] = []
         for device in self.store.devices:
-            hay = "%s %s %s" % (device.name, device.host, device.notes)
+            hay = "%s %s %s %s" % (device.name, device.host, device.notes, device.os_name)
             if keyword and keyword not in hay.lower():
                 continue
             rows.append(device)
@@ -1362,8 +1383,15 @@ class MainWindow(QMainWindow):
 
     def _probe_devices(self) -> None:
         results: dict[str, str] = {}
+        os_changed = False
         for device in list(self.store.devices):
-            results[device.id] = "online" if probe_online(device.host, device.port) else "offline"
+            online, os_name = probe_device(device.host, device.port)
+            results[device.id] = "online" if online else "offline"
+            if os_name and os_name != device.os_name:
+                device.os_name = os_name
+                os_changed = True
+        if os_changed:
+            self.store.save()
         self.probe_done.emit(results)
 
     def _apply_probe(self, results: dict) -> None:

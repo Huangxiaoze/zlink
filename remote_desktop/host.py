@@ -9,11 +9,14 @@ from typing import Any, Callable, Optional
 from . import PROTOCOL_VERSION
 from .capture import ScreenCapturer
 from .config import HostConfig, StreamConfig
+from .devices import detect_os_label
 from .input_io import InputInjector
 from .net import Connection, password_matches, serve_forever
 from .protocol import MsgType, ProtocolError, decode_json, pack_frame_message
 
 log = logging.getLogger(__name__)
+
+_HOST_OS = detect_os_label()
 
 
 class RemoteHost:
@@ -24,6 +27,7 @@ class RemoteHost:
         self._capturer = ScreenCapturer(self.stream)
         self._session_lock = threading.Lock()
         self.session_live = threading.Event()
+        self._os_label = _HOST_OS
         # GUI/main-thread clipboard bridge exchanges packed CLIPBOARD payloads here.
         self.clipboard_out: queue.Queue = queue.Queue(maxsize=128)
         self.clipboard_in: queue.Queue = queue.Queue(maxsize=128)
@@ -71,11 +75,16 @@ class RemoteHost:
                 except queue.Empty:
                     break
 
+    def _hello_ack(self, conn: Connection, payload: dict[str, Any]) -> None:
+        data = dict(payload)
+        data.setdefault("os", self._os_label)
+        conn.send_json(MsgType.HELLO_ACK, data)
+
     def _handle_client(self, conn: Connection, addr: tuple) -> None:
         if not self._session_lock.acquire(blocking=False):
             log.warning("reject %s: session busy", addr)
             try:
-                conn.send_json(MsgType.HELLO_ACK, {"ok": False, "reason": "busy"})
+                self._hello_ack(conn, {"ok": False, "reason": "busy"})
             except OSError:
                 pass
             return
@@ -131,15 +140,20 @@ class RemoteHost:
     def _handshake(self, conn: Connection) -> bool:
         frame = conn.recv_frame()
         if frame.type != MsgType.HELLO:
-            conn.send_json(MsgType.HELLO_ACK, {"ok": False, "reason": "expected_hello"})
+            self._hello_ack(conn, {"ok": False, "reason": "expected_hello"})
             return False
         hello = decode_json(frame.payload)
         client_ver = int(hello.get("version", -1))
         if client_ver != PROTOCOL_VERSION:
-            conn.send_json(MsgType.HELLO_ACK, {"ok": False, "reason": "version_mismatch"})
+            self._hello_ack(conn, {"ok": False, "reason": "version_mismatch"})
+            return False
+        # Probes use role=probe and intentionally send an empty password; still
+        # advertise OS so the device list can show Windows / macOS / Ubuntu.
+        if str(hello.get("role") or "") == "probe":
+            self._hello_ack(conn, {"ok": False, "reason": "probe"})
             return False
         if not password_matches(self.config.net.password, str(hello.get("password", ""))):
-            conn.send_json(MsgType.HELLO_ACK, {"ok": False, "reason": "auth_failed"})
+            self._hello_ack(conn, {"ok": False, "reason": "auth_failed"})
             log.warning("auth failed")
             return False
 
@@ -147,8 +161,8 @@ class RemoteHost:
         if isinstance(q, dict):
             self._apply_quality(q)
 
-        conn.send_json(
-            MsgType.HELLO_ACK,
+        self._hello_ack(
+            conn,
             {
                 "ok": True,
                 "screen_w": self._capturer.src_width,
