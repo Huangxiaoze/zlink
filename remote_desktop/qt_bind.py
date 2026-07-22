@@ -227,6 +227,22 @@ Key_V = _enum(
     getattr(Qt, "Key_V", None),
     getattr(getattr(Qt, "Key", None), "Key_V", None),
 )
+Key_A = _enum(
+    getattr(Qt, "Key_A", None),
+    getattr(getattr(Qt, "Key", None), "Key_A", None),
+)
+Key_Z = _enum(
+    getattr(Qt, "Key_Z", None),
+    getattr(getattr(Qt, "Key", None), "Key_Z", None),
+)
+Key_0 = _enum(
+    getattr(Qt, "Key_0", None),
+    getattr(getattr(Qt, "Key", None), "Key_0", None),
+)
+Key_9 = _enum(
+    getattr(Qt, "Key_9", None),
+    getattr(getattr(Qt, "Key", None), "Key_9", None),
+)
 WindowShortcut = _enum(
     getattr(Qt, "WindowShortcut", None),
     getattr(getattr(Qt, "ShortcutContext", None), "WindowShortcut", None),

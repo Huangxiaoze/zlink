@@ -356,6 +356,7 @@ class SettingsDialog(QDialog):
 class MainWindow(QMainWindow):
     probe_done = Signal(dict)
     host_crashed = Signal()
+    host_clip_wakeup = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -371,6 +372,7 @@ class MainWindow(QMainWindow):
 
         self.probe_done.connect(self._apply_probe)
         self.host_crashed.connect(self._on_host_crashed)
+        self.host_clip_wakeup.connect(self._drain_host_clipboard_in)
 
         self._build()
         self.retranslate()
@@ -758,6 +760,8 @@ class MainWindow(QMainWindow):
         ).clamp()
         net = NetConfig(host=self.store.settings.host_bind, port=port, password=password)
         host = RemoteHost(HostConfig(net=net, stream=stream, bind_require_password=True))
+        # Wake GUI immediately when clipboard arrives (queued across threads).
+        host.clipboard_notify = lambda: self.host_clip_wakeup.emit()
         self._host = host
 
         def runner() -> None:
@@ -804,14 +808,19 @@ class MainWindow(QMainWindow):
     def _drain_host_clipboard_in(self) -> None:
         host = self._host
         bridge = self._host_clip
-        if host is None or bridge is None:
+        if host is None:
             return
-        while True:
-            try:
-                payload = host.clipboard_in.get_nowait()
-            except queue.Empty:
-                break
-            bridge.handle_remote_payload(payload)
+        try:
+            if bridge is not None:
+                while True:
+                    try:
+                        payload = host.clipboard_in.get_nowait()
+                    except queue.Empty:
+                        break
+                    bridge.handle_remote_payload(payload)
+        finally:
+            # Unblock host recv loop waiting for clipboard apply.
+            host.clipboard_applied.set()
 
     def _stop_host_clipboard(self) -> None:
         if self._host_clip_timer is not None:

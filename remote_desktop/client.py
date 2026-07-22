@@ -17,8 +17,12 @@ from .qt_bind import (
     FastTransformation,
     Format_RGB32,
     KeepAspectRatio,
+    Key_0,
+    Key_9,
+    Key_A,
     Key_C,
     Key_V,
+    Key_Z,
     MiddleButton,
     MouseFocusReason,
     QApplication,
@@ -74,6 +78,8 @@ class RemoteCanvas(QWidget):
         self._blit_rect = (0, 0, 0, 0)
         self.on_mouse: Optional[Callable[[str, float, float, Dict[str, Any]], None]] = None
         self.on_key: Optional[Callable[[str, str], None]] = None
+        # Called before injecting Ctrl+V so local clipboard can be pushed first.
+        self.on_before_remote_paste: Optional[Callable[[], None]] = None
         self.setAttribute(WA_OpaquePaintEvent, True)
         self.setAttribute(WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
@@ -162,6 +168,15 @@ class RemoteCanvas(QWidget):
         if (mods & ControlModifier) and (mods & AltModifier) and event.key() in {Key_C, Key_V}:
             event.ignore()
             return
+        # Ctrl+V in viewer = paste on remote: push local clipboard first.
+        if (
+            not event.isAutoRepeat()
+            and (mods & ControlModifier)
+            and not (mods & AltModifier)
+            and event.key() == Key_V
+            and self.on_before_remote_paste is not None
+        ):
+            self.on_before_remote_paste()
         if not event.isAutoRepeat() and self.on_key:
             self.on_key("down", _qt_key_name(event))
         super().keyPressEvent(event)
@@ -211,6 +226,7 @@ class RemoteClientWindow(QMainWindow):
         self.canvas = RemoteCanvas()
         self.canvas.on_mouse = self._handle_mouse
         self.canvas.on_key = self._handle_key
+        self.canvas.on_before_remote_paste = self._before_remote_paste
         self.hud = QLabel(self.canvas)
         self.hud.setStyleSheet(
             "QLabel { color: #B8F0C8; background: rgba(0,0,0,120); padding: 4px 8px; }"
@@ -249,6 +265,11 @@ class RemoteClientWindow(QMainWindow):
         if self._clip is not None:
             self._clip.request_remote()
             self._on_status(i18n.t("clipboard_pull"))
+
+    def _before_remote_paste(self) -> None:
+        """Push THIS PC clipboard to remote before injecting Ctrl+V."""
+        if self._clip is not None:
+            self._clip.push_now()
 
     def start(self) -> None:
         self._stop.clear()
@@ -468,10 +489,19 @@ def _qt_key_name(event: QKeyEvent) -> str:
     key = event.key()
     if key in _KEY_CONSTANTS:
         return _KEY_CONSTANTS[key]
+    # Under Ctrl/Alt, event.text() is often a control char (e.g. Ctrl+V -> \x16).
+    # Prefer physical letter/digit key codes so remote paste/copy actually works.
+    if Key_A <= key <= Key_Z:
+        return chr(ord("a") + int(key - Key_A))
+    if Key_0 <= key <= Key_9:
+        return chr(ord("0") + int(key - Key_0))
     text = event.text()
-    if text:
+    if text and len(text) == 1 and text.isprintable():
         return text
     name = QKeySequence(key).toString().lower()
+    # Strip accidental modifier prefixes from QKeySequence.
+    if name.startswith("ctrl+") or name.startswith("alt+") or name.startswith("shift+"):
+        name = name.split("+")[-1]
     return name or str(key)
 
 

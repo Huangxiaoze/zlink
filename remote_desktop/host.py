@@ -4,7 +4,7 @@ import logging
 import queue
 import threading
 import time
-from typing import Any
+from typing import Any, Callable, Optional
 
 from . import PROTOCOL_VERSION
 from .capture import ScreenCapturer
@@ -27,6 +27,10 @@ class RemoteHost:
         # GUI/main-thread clipboard bridge exchanges packed CLIPBOARD payloads here.
         self.clipboard_out: queue.Queue = queue.Queue(maxsize=128)
         self.clipboard_in: queue.Queue = queue.Queue(maxsize=128)
+        # GUI sets this after applying a clipboard packet on the Qt thread.
+        self.clipboard_applied = threading.Event()
+        # Optional wakeup for GUI (e.g. Qt Signal.emit) — called from recv thread.
+        self.clipboard_notify: Optional[Callable[[], None]] = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -292,6 +296,18 @@ class RemoteHost:
                     self.clipboard_in.put_nowait(frame.payload)
                 except queue.Full:
                     log.warning("clipboard_in full, drop packet")
+                    continue
+                # Wait until GUI applies clipboard BEFORE injecting later keys
+                # (otherwise remote Ctrl+V pastes the old clipboard).
+                notify = self.clipboard_notify
+                if notify is not None:
+                    self.clipboard_applied.clear()
+                    try:
+                        notify()
+                    except Exception:
+                        log.exception("clipboard_notify failed")
+                    if not self.clipboard_applied.wait(timeout=1.0):
+                        log.warning("clipboard apply timeout")
             elif frame.type == MsgType.HEARTBEAT:
                 continue
             elif frame.type == MsgType.BYE:
