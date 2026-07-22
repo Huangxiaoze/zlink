@@ -224,38 +224,43 @@ class RemoteCanvas(QWidget):
         self.on_mouse(action, norm[0], norm[1], extra)
 
 
-class FullscreenDropBar(QFrame):
-    """Top edge pull-down chrome shown only while fullscreen."""
+class ViewerChromeBar(QFrame):
+    """Top-edge pull-down control: fullscreen / exit fullscreen (right-aligned)."""
 
-    def __init__(self, parent: QWidget, on_exit: Callable[[], None], on_hover: Callable[[bool], None]) -> None:
+    def __init__(
+        self,
+        parent: QWidget,
+        on_toggle: Callable[[], None],
+        on_hover: Callable[[bool], None],
+    ) -> None:
         super().__init__(parent)
         self._on_hover = on_hover
-        self.setObjectName("fsDropBar")
+        self.setObjectName("viewerChromeBar")
         self.setStyleSheet(
-            "#fsDropBar {"
+            "#viewerChromeBar {"
             "  background: rgba(15, 22, 30, 235);"
             "  border: none;"
             "  border-bottom-left-radius: 10px;"
             "  border-bottom-right-radius: 10px;"
             "}"
-            "#fsDropBar QPushButton {"
+            "#viewerChromeBar QPushButton {"
             "  color: #E8FFF4; background: rgba(255,255,255,18);"
             "  border: 1px solid rgba(125,255,206,120); border-radius: 6px;"
-            "  padding: 6px 16px; font-size: 12px; font-weight: 600;"
+            "  padding: 6px 14px; font-size: 12px; font-weight: 600;"
             "}"
-            "#fsDropBar QPushButton:hover {"
+            "#viewerChromeBar QPushButton:hover {"
             "  background: rgba(125,255,206,40); color: #FFFFFF;"
             "}"
         )
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 8, 16, 10)
+        # Keep the action near the window caption buttons (minimize/close).
+        lay.setContentsMargins(12, 8, 18, 10)
         lay.addStretch(1)
-        self.btn_exit = QPushButton(i18n.t("viewer_exit_fullscreen"))
-        self.btn_exit.setCursor(PointingHandCursor)
-        self.btn_exit.setFocusPolicy(NoFocus)
-        self.btn_exit.clicked.connect(on_exit)
-        lay.addWidget(self.btn_exit)
-        lay.addStretch(1)
+        self.btn_action = QPushButton(i18n.t("viewer_fullscreen"))
+        self.btn_action.setCursor(PointingHandCursor)
+        self.btn_action.setFocusPolicy(NoFocus)
+        self.btn_action.clicked.connect(on_toggle)
+        lay.addWidget(self.btn_action)
         self.hide()
 
     def enterEvent(self, event) -> None:  # noqa: N802
@@ -283,8 +288,8 @@ class RemoteClientWindow(QMainWindow):
         self._clip: Optional[ClipboardBridge] = None
         self._base_title = config.window_title
         self._swallow_esc_up = False
-        self._fs_edge_px = 10
-        self._fs_drop_hover = False
+        self._chrome_edge_px = 10
+        self._chrome_hover = False
 
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
@@ -293,30 +298,6 @@ class RemoteClientWindow(QMainWindow):
         layout = QVBoxLayout(self._central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        # Windowed-mode toolbar (hidden while fullscreen).
-        self.toolbar = QWidget()
-        self.toolbar.setObjectName("viewerToolbar")
-        self.toolbar.setFixedHeight(36)
-        self.toolbar.setStyleSheet(
-            "#viewerToolbar { background: #141C24; border-bottom: 1px solid #243040; }"
-            "#viewerToolbar QPushButton {"
-            "  color: #D7E6DF; background: transparent;"
-            "  border: 1px solid #334155; border-radius: 4px;"
-            "  padding: 4px 10px; font-size: 12px;"
-            "}"
-            "#viewerToolbar QPushButton:hover { color: #FFFFFF; border-color: #7DFFCE; }"
-        )
-        bar = QHBoxLayout(self.toolbar)
-        bar.setContentsMargins(10, 4, 10, 4)
-        bar.setSpacing(8)
-        bar.addStretch(1)
-        self.btn_fullscreen = QPushButton(i18n.t("viewer_fullscreen"))
-        self.btn_fullscreen.setCursor(PointingHandCursor)
-        self.btn_fullscreen.setFocusPolicy(NoFocus)
-        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
-        bar.addWidget(self.btn_fullscreen)
-        layout.addWidget(self.toolbar, 0)
 
         self.canvas = RemoteCanvas()
         self.canvas.host_window = self
@@ -327,15 +308,15 @@ class RemoteClientWindow(QMainWindow):
         layout.addWidget(self.canvas, 1)
         self.setCentralWidget(self._central)
 
-        # Fullscreen-only top drop-down (overlay; not in the layout).
-        self.fs_drop = FullscreenDropBar(
+        # Hidden by default; reveal when mouse touches the top edge.
+        self.chrome_bar = ViewerChromeBar(
             self._central,
-            on_exit=lambda: self._set_fullscreen(False),
-            on_hover=self._on_fs_drop_hover,
+            on_toggle=self._toggle_fullscreen,
+            on_hover=self._on_chrome_hover,
         )
-        self._fs_hide_timer = QTimer(self)
-        self._fs_hide_timer.setSingleShot(True)
-        self._fs_hide_timer.timeout.connect(self._hide_fs_drop)
+        self._chrome_hide_timer = QTimer(self)
+        self._chrome_hide_timer.setSingleShot(True)
+        self._chrome_hide_timer.timeout.connect(self._hide_chrome_bar)
 
         self._bus.frame_jpeg.connect(self._on_frame_jpeg)
         self._bus.status.connect(self._on_status)
@@ -386,52 +367,48 @@ class RemoteClientWindow(QMainWindow):
         self._set_fullscreen(not self.isFullScreen())
 
     def _set_fullscreen(self, enabled: bool) -> None:
+        self._hide_chrome_bar()
         if enabled:
             self.showFullScreen()
-            self.toolbar.hide()
-            self._hide_fs_drop()
         else:
-            self._hide_fs_drop()
             self.showNormal()
-            self.toolbar.show()
-            self.btn_fullscreen.setText(i18n.t("viewer_fullscreen"))
         self.canvas.setFocus(MouseFocusReason)
 
     def _on_canvas_mouse_y(self, y: float) -> None:
-        if not self.isFullScreen():
-            return
-        if y <= self._fs_edge_px:
-            self._show_fs_drop()
-        elif not self._fs_drop_hover and y > self.fs_drop.height() + 8:
-            self._fs_hide_timer.start(280)
+        # Same reveal gesture in windowed and fullscreen modes.
+        if y <= self._chrome_edge_px:
+            self._show_chrome_bar()
+        elif not self._chrome_hover and y > self.chrome_bar.height() + 8:
+            self._chrome_hide_timer.start(280)
 
-    def _on_fs_drop_hover(self, hovering: bool) -> None:
-        self._fs_drop_hover = hovering
+    def _on_chrome_hover(self, hovering: bool) -> None:
+        self._chrome_hover = hovering
         if hovering:
-            self._fs_hide_timer.stop()
-            self._show_fs_drop()
+            self._chrome_hide_timer.stop()
+            self._show_chrome_bar()
         else:
-            self._fs_hide_timer.start(350)
+            self._chrome_hide_timer.start(350)
 
-    def _show_fs_drop(self) -> None:
-        if not self.isFullScreen():
-            return
-        self._fs_hide_timer.stop()
-        self.fs_drop.btn_exit.setText(i18n.t("viewer_exit_fullscreen"))
+    def _show_chrome_bar(self) -> None:
+        self._chrome_hide_timer.stop()
+        if self.isFullScreen():
+            self.chrome_bar.btn_action.setText(i18n.t("viewer_exit_fullscreen"))
+        else:
+            self.chrome_bar.btn_action.setText(i18n.t("viewer_fullscreen"))
         w = max(1, self._central.width())
-        self.fs_drop.setGeometry(0, 0, w, 48)
-        self.fs_drop.raise_()
-        self.fs_drop.show()
+        self.chrome_bar.setGeometry(0, 0, w, 48)
+        self.chrome_bar.raise_()
+        self.chrome_bar.show()
 
-    def _hide_fs_drop(self) -> None:
-        self._fs_hide_timer.stop()
-        self._fs_drop_hover = False
-        self.fs_drop.hide()
+    def _hide_chrome_bar(self) -> None:
+        self._chrome_hide_timer.stop()
+        self._chrome_hover = False
+        self.chrome_bar.hide()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        if self.isFullScreen() and self.fs_drop.isVisible():
-            self._show_fs_drop()
+        if self.chrome_bar.isVisible():
+            self._show_chrome_bar()
 
     def start(self) -> None:
         self._stop.clear()
