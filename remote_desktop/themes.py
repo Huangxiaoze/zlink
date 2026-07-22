@@ -529,7 +529,6 @@ QLabel#brand {{
     color: {c.side_text};
     font-size: 22px;
     font-weight: 800;
-    letter-spacing: 0.5px;
 }}
 QLabel#brandTag {{
     color: {c.side_muted};
@@ -557,13 +556,11 @@ QLabel#codeValue {{
     color: {c.side_text};
     font-size: 26px;
     font-weight: 800;
-    letter-spacing: 1px;
 }}
 QLabel#passValue {{
     color: {c.pass_value};
     font-size: 22px;
     font-weight: 800;
-    letter-spacing: 2px;
 }}
 QLabel#pageTitle {{
     color: {c.text};
@@ -843,7 +840,6 @@ QLabel#confirmEyebrow {{
     color: {c.muted};
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.4px;
 }}
 QLabel#confirmTitle {{
     color: {c.text};
