@@ -96,6 +96,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "clipboard_ready": "剪贴板已启用 | Ctrl+Alt+C推送到远程 | Ctrl+Alt+V从远程拉取",
         "clipboard_push": "正在推送本地剪贴板到远程…",
         "clipboard_pull": "正在从远程拉取剪贴板…",
+        "viewer_fullscreen": "全屏",
+        "viewer_exit_fullscreen": "退出全屏",
     },
     "en_US": {
         "app_title": "LeafLink Remote",
@@ -188,6 +190,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "clipboard_ready": "Clipboard on | Ctrl+Alt+C push | Ctrl+Alt+V pull",
         "clipboard_push": "Pushing local clipboard to remote…",
         "clipboard_pull": "Pulling clipboard from remote…",
+        "viewer_fullscreen": "Full screen",
+        "viewer_exit_fullscreen": "Exit full screen",
     },
 }
 

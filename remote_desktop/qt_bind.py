@@ -247,6 +247,14 @@ WindowShortcut = _enum(
     getattr(Qt, "WindowShortcut", None),
     getattr(getattr(Qt, "ShortcutContext", None), "WindowShortcut", None),
 )
+Key_F11 = _enum(
+    getattr(Qt, "Key_F11", None),
+    getattr(getattr(Qt, "Key", None), "Key_F11", None),
+)
+Key_Escape = _enum(
+    getattr(Qt, "Key_Escape", None),
+    getattr(getattr(Qt, "Key", None), "Key_Escape", None),
+)
 
 KEY_MAP_SRC = [
     ("Key_Return", "enter"),

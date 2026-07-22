@@ -21,20 +21,23 @@ from .qt_bind import (
     Key_9,
     Key_A,
     Key_C,
+    Key_Escape,
+    Key_F11,
     Key_V,
     Key_Z,
     MiddleButton,
     MouseFocusReason,
+    PointingHandCursor,
     QApplication,
     QImage,
     QKeyEvent,
     QKeySequence,
-    QLabel,
     QMainWindow,
     QMouseEvent,
     QObject,
     QPainter,
     QPixmap,
+    QPushButton,
     QShortcut,
     QTimer,
     QVBoxLayout,
@@ -80,6 +83,9 @@ class RemoteCanvas(QWidget):
         self.on_key: Optional[Callable[[str, str], None]] = None
         # Called before injecting Ctrl+V so local clipboard can be pushed first.
         self.on_before_remote_paste: Optional[Callable[[], None]] = None
+        # Local chrome keys (fullscreen); return True to swallow.
+        self.on_local_key: Optional[Callable[[QKeyEvent], bool]] = None
+        self.host_window: Optional["RemoteClientWindow"] = None
         self.setAttribute(WA_OpaquePaintEvent, True)
         self.setAttribute(WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
@@ -168,6 +174,9 @@ class RemoteCanvas(QWidget):
         if (mods & ControlModifier) and (mods & AltModifier) and event.key() in {Key_C, Key_V}:
             event.ignore()
             return
+        if self.on_local_key is not None and self.on_local_key(event):
+            event.accept()
+            return
         # Ctrl+V in viewer = paste on remote: push local clipboard first.
         if (
             not event.isAutoRepeat()
@@ -185,6 +194,15 @@ class RemoteCanvas(QWidget):
         mods = event.modifiers()
         if (mods & ControlModifier) and (mods & AltModifier) and event.key() in {Key_C, Key_V}:
             event.ignore()
+            return
+        # Keep local chrome keys off the remote OS.
+        if event.key() == Key_F11:
+            event.accept()
+            return
+        win = self.host_window
+        if event.key() == Key_Escape and win is not None and win._swallow_esc_up:
+            win._swallow_esc_up = False
+            event.accept()
             return
         if not event.isAutoRepeat() and self.on_key:
             self.on_key("up", _qt_key_name(event))
@@ -211,10 +229,11 @@ class RemoteClientWindow(QMainWindow):
         self._pending_meta: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self._net_thread: Optional[threading.Thread] = None
-        self._hud_tick = 0
         self._last_mouse_move_ts = 0.0
         self._mouse_move_interval_s = 1.0 / 30.0  # throttle move flood
         self._clip: Optional[ClipboardBridge] = None
+        self._base_title = config.window_title
+        self._swallow_esc_up = False
 
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
@@ -224,17 +243,26 @@ class RemoteClientWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.canvas = RemoteCanvas()
+        self.canvas.host_window = self
         self.canvas.on_mouse = self._handle_mouse
         self.canvas.on_key = self._handle_key
         self.canvas.on_before_remote_paste = self._before_remote_paste
-        self.hud = QLabel(self.canvas)
-        self.hud.setStyleSheet(
-            "QLabel { color: #B8F0C8; background: rgba(0,0,0,120); padding: 4px 8px; }"
-        )
-        self.hud.setAttribute(WA_TransparentForMouseEvents, True)
-        self.hud.move(8, 8)
+        self.canvas.on_local_key = self._handle_local_key
         layout.addWidget(self.canvas, 1)
         self.setCentralWidget(central)
+
+        self.btn_fullscreen = QPushButton(i18n.t("viewer_fullscreen"), self.canvas)
+        self.btn_fullscreen.setCursor(PointingHandCursor)
+        self.btn_fullscreen.setStyleSheet(
+            "QPushButton {"
+            "  color: #E8FFF4; background: rgba(20,28,36,180);"
+            "  border: 1px solid rgba(125,255,206,90); border-radius: 6px;"
+            "  padding: 6px 12px; font-size: 12px; font-weight: 600;"
+            "}"
+            "QPushButton:hover { background: rgba(30,44,54,210); }"
+        )
+        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
+        self.btn_fullscreen.raise_()
 
         self._bus.frame_jpeg.connect(self._on_frame_jpeg)
         self._bus.status.connect(self._on_status)
@@ -256,20 +284,56 @@ class RemoteClientWindow(QMainWindow):
         self._sc_pull.setContext(WindowShortcut)
         self._sc_pull.activated.connect(self._hotkey_pull_clipboard)
 
+        QTimer.singleShot(0, self._place_chrome)
+
     def _hotkey_push_clipboard(self) -> None:
         if self._clip is not None:
             self._clip.push_now()
-            self._on_status(i18n.t("clipboard_push"))
 
     def _hotkey_pull_clipboard(self) -> None:
         if self._clip is not None:
             self._clip.request_remote()
-            self._on_status(i18n.t("clipboard_pull"))
 
     def _before_remote_paste(self) -> None:
         """Push THIS PC clipboard to remote before injecting Ctrl+V."""
         if self._clip is not None:
             self._clip.push_now()
+
+    def _handle_local_key(self, event: QKeyEvent) -> bool:
+        if event.isAutoRepeat():
+            return False
+        if event.key() == Key_F11:
+            self._toggle_fullscreen()
+            return True
+        if event.key() == Key_Escape and self.isFullScreen():
+            self._swallow_esc_up = True
+            self._set_fullscreen(False)
+            return True
+        return False
+
+    def _toggle_fullscreen(self) -> None:
+        self._set_fullscreen(not self.isFullScreen())
+
+    def _set_fullscreen(self, enabled: bool) -> None:
+        if enabled:
+            self.showFullScreen()
+            self.btn_fullscreen.setText(i18n.t("viewer_exit_fullscreen"))
+        else:
+            self.showNormal()
+            self.btn_fullscreen.setText(i18n.t("viewer_fullscreen"))
+        self._place_chrome()
+
+    def _place_chrome(self) -> None:
+        btn = self.btn_fullscreen
+        btn.adjustSize()
+        margin = 10
+        x = max(margin, self.canvas.width() - btn.width() - margin)
+        btn.move(x, margin)
+        btn.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._place_chrome()
 
     def start(self) -> None:
         self._stop.clear()
@@ -300,9 +364,12 @@ class RemoteClientWindow(QMainWindow):
             self._clip = None
 
     def _on_status(self, text: str) -> None:
-        self.hud.setText(text)
-        self.hud.adjustSize()
-        self.hud.raise_()
+        # Keep connection hints in the window title; no on-canvas HUD.
+        text = (text or "").strip()
+        if text:
+            self.setWindowTitle("%s — %s" % (self._base_title, text))
+        else:
+            self.setWindowTitle(self._base_title)
 
     def _on_frame_jpeg(self, jpeg: object, meta: object) -> None:
         with self._lock:
@@ -312,7 +379,6 @@ class RemoteClientWindow(QMainWindow):
     def _present_pending(self) -> None:
         with self._lock:
             jpeg = self._pending_jpeg
-            meta = dict(self._pending_meta)
             self._pending_jpeg = None
         if not jpeg:
             return
@@ -322,12 +388,6 @@ class RemoteClientWindow(QMainWindow):
         if image.format() != Format_RGB32:
             image = image.convertToFormat(Format_RGB32)
         self.canvas.set_image(image)
-        self._hud_tick = (self._hud_tick + 1) % 15
-        if self._hud_tick == 0:
-            self._on_status(
-                "seq=%s q=%s %sx%s"
-                % (meta.get("seq", "-"), meta.get("q", "-"), meta.get("w", "-"), meta.get("h", "-"))
-            )
 
     def _session_loop(self) -> None:
         backoff = 1.0
@@ -379,7 +439,7 @@ class RemoteClientWindow(QMainWindow):
 
         session_stop = threading.Event()
         self._bus.start_clipboard.emit()
-        self._bus.status.emit(i18n.t("clipboard_ready"))
+        self._bus.status.emit("")  # connected: clear title suffix
 
         hb = threading.Thread(
             target=self._heartbeat_loop,
@@ -424,7 +484,6 @@ class RemoteClientWindow(QMainWindow):
                 self._stop.set()
 
         self._clip = ClipboardBridge(send_packet=send_packet, parent=self)
-        self._clip.status.connect(self._on_status)
         self._clip.start()
 
     def _on_clipboard_payload(self, payload: object) -> None:
