@@ -4,6 +4,7 @@ import logging
 import queue
 import threading
 import time
+from pathlib import Path
 
 from .qt_bind import (
     AA_DontShowIconsInMenus,
@@ -21,6 +22,7 @@ from .qt_bind import (
     QApplication,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -49,6 +51,7 @@ from .client import RemoteClientWindow
 from .clipboard_sync import ClipboardBridge
 from .config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamConfig
 from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_online
+from .file_transfer import FileAssembler, MAX_FILE_BYTES, send_file
 from .host import RemoteHost
 from .i18n import i18n
 from .qt_fonts import apply_app_font, ensure_utf8_stdio
@@ -355,6 +358,8 @@ class MainWindow(QMainWindow):
     probe_done = Signal(dict)
     host_crashed = Signal()
     host_clip_wakeup = Signal()
+    host_file_wakeup = Signal()
+    file_status = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -367,6 +372,10 @@ class MainWindow(QMainWindow):
         self._viewers: list[RemoteClientWindow] = []
         self._host_clip: ClipboardBridge | None = None
         self._host_clip_timer: QTimer | None = None
+        self._host_files: FileAssembler | None = None
+        self._host_file_timer: QTimer | None = None
+        self._file_sending = False
+        self._file_send_stop = threading.Event()
         self._selected_device_id: str | None = None
         self._device_cards: dict[str, DeviceCard] = {}
         self._card_hover_count = 0
@@ -374,6 +383,8 @@ class MainWindow(QMainWindow):
         self.probe_done.connect(self._apply_probe)
         self.host_crashed.connect(self._on_host_crashed)
         self.host_clip_wakeup.connect(self._drain_host_clipboard_in)
+        self.host_file_wakeup.connect(self._drain_host_file_in)
+        self.file_status.connect(self._set_status)
 
         self._build()
         apply_app_icon(self)
@@ -487,6 +498,12 @@ class MainWindow(QMainWindow):
         row_side_btns.addWidget(self.btn_refresh_local)
         row_side_btns.addWidget(self.btn_regen)
 
+        self.btn_send_file = QPushButton()
+        self.btn_send_file.setObjectName("ghostDark")
+        self.btn_send_file.setCursor(PointingHandCursor)
+        self.btn_send_file.setEnabled(False)
+        self.btn_send_file.clicked.connect(self._pick_and_send_file_to_client)
+
         self.lbl_host_state = QLabel()
         self.lbl_host_state.setObjectName("hostWarn")
 
@@ -499,6 +516,7 @@ class MainWindow(QMainWindow):
         side_l.addSpacing(8)
         side_l.addWidget(self.btn_host)
         side_l.addLayout(row_side_btns)
+        side_l.addWidget(self.btn_send_file)
         side_l.addWidget(self.lbl_host_state)
         side_l.addStretch(1)
 
@@ -605,6 +623,8 @@ class MainWindow(QMainWindow):
         self.lbl_ips_title.setText(i18n.t("local_ip"))
         self.btn_refresh_local.setText(i18n.t("refresh_local"))
         self.btn_regen.setText(i18n.t("regen_code"))
+        self.btn_send_file.setText(i18n.t("send_file"))
+        self._refresh_send_file_button()
         if self._host is None:
             self.btn_host.setText(i18n.t("start_host"))
             self._restyle(self.btn_host, "primary")
@@ -883,8 +903,9 @@ class MainWindow(QMainWindow):
         ).clamp()
         net = NetConfig(host=self.store.settings.host_bind, port=DEFAULT_PORT, password=password)
         host = RemoteHost(HostConfig(net=net, stream=stream, bind_require_password=True))
-        # Wake GUI immediately when clipboard arrives (queued across threads).
+        # Wake GUI immediately when clipboard / file packets arrive.
         host.clipboard_notify = lambda: self.host_clip_wakeup.emit()
+        host.file_notify = lambda: self.host_file_wakeup.emit()
         self._host = host
 
         def runner() -> None:
@@ -897,11 +918,13 @@ class MainWindow(QMainWindow):
         self._host_thread = threading.Thread(target=runner, name="gui-host", daemon=True)
         self._host_thread.start()
         self._start_host_clipboard()
+        self._start_host_files()
         self.btn_host.setText(i18n.t("stop_host"))
         self._restyle(self.btn_host, "danger")
         self.lbl_host_state.setText(i18n.t("host_on", port=DEFAULT_PORT))
         self._restyle(self.lbl_host_state, "hostOk")
         self._set_status(i18n.t("host_started", port=DEFAULT_PORT))
+        self._refresh_send_file_button()
 
     def _enqueue_host_clipboard(self, packet: bytes) -> None:
         host = self._host
@@ -911,6 +934,13 @@ class MainWindow(QMainWindow):
             host.clipboard_out.put_nowait(packet)
         except queue.Full:
             log.warning("host clipboard_out full")
+
+    def _enqueue_host_file(self, packet: bytes) -> None:
+        host = self._host
+        if host is None or not host.session_live.is_set():
+            raise ConnectionError("no remote session")
+        # Blocking put so large transfers don't drop mid-file.
+        host.file_out.put(packet, timeout=60.0)
 
     def _start_host_clipboard(self) -> None:
         self._stop_host_clipboard()
@@ -953,8 +983,118 @@ class MainWindow(QMainWindow):
             self._host_clip.deleteLater()
             self._host_clip = None
 
+    def _start_host_files(self) -> None:
+        self._stop_host_files()
+        self._file_send_stop.clear()
+        self._host_files = FileAssembler(
+            on_progress=lambda name, done, total: self.file_status.emit(
+                i18n.t(
+                    "file_receiving",
+                    name=name,
+                    pct=(100 if total <= 0 else min(100, int(done * 100 / total))),
+                )
+            ),
+            on_complete=lambda path: self.file_status.emit(
+                i18n.t("file_saved_to", path=str(path))
+            ),
+            on_error=lambda err: self.file_status.emit(
+                i18n.t("file_transfer_failed", error=err)
+            ),
+        )
+        self._host_file_timer = QTimer(self)
+        self._host_file_timer.setInterval(100)
+        self._host_file_timer.timeout.connect(self._on_host_file_tick)
+        self._host_file_timer.start()
+
+    def _on_host_file_tick(self) -> None:
+        self._drain_host_file_in()
+        self._refresh_send_file_button()
+
+    def _drain_host_file_in(self) -> None:
+        host = self._host
+        assembler = self._host_files
+        if host is None or assembler is None:
+            return
+        while True:
+            try:
+                payload = host.file_in.get_nowait()
+            except queue.Empty:
+                break
+            assembler.handle_payload(payload)
+
+    def _stop_host_files(self) -> None:
+        self._file_send_stop.set()
+        self._file_sending = False
+        if self._host_file_timer is not None:
+            self._host_file_timer.stop()
+            self._host_file_timer.deleteLater()
+            self._host_file_timer = None
+        if self._host_files is not None:
+            self._host_files.clear()
+            self._host_files = None
+        self._refresh_send_file_button()
+
+    def _refresh_send_file_button(self) -> None:
+        live = self._host is not None and self._host.session_live.is_set()
+        self.btn_send_file.setEnabled(bool(live) and not self._file_sending)
+
+    def _pick_and_send_file_to_client(self) -> None:
+        if self._host is None or not self._host.session_live.is_set():
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_no_session"))
+            return
+        if self._file_sending:
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_busy"))
+            return
+        path, _filter = QFileDialog.getOpenFileName(
+            self, i18n.t("send_file_pick"), str(Path.home())
+        )
+        if not path:
+            return
+        src = Path(path)
+        if not src.is_file():
+            return
+        if src.stat().st_size > MAX_FILE_BYTES:
+            show_warning(
+                self,
+                title=i18n.t("tip"),
+                message=i18n.t("file_too_large", name=src.name),
+            )
+            return
+
+        self._file_sending = True
+        self._file_send_stop.clear()
+        self._refresh_send_file_button()
+        self._set_status(i18n.t("file_sending", name=src.name, pct=0))
+
+        def worker() -> None:
+            try:
+                send_file(
+                    src,
+                    self._enqueue_host_file,
+                    on_progress=lambda name, done, total: self.file_status.emit(
+                        i18n.t(
+                            "file_sending",
+                            name=name,
+                            pct=(100 if total <= 0 else min(100, int(done * 100 / total))),
+                        )
+                    ),
+                    should_stop=lambda: self._file_send_stop.is_set(),
+                )
+                self.file_status.emit(i18n.t("file_sent", name=src.name))
+            except InterruptedError:
+                self.file_status.emit(i18n.t("file_transfer_failed", error="cancelled"))
+            except Exception as exc:
+                log.exception("host send file failed")
+                self.file_status.emit(i18n.t("file_transfer_failed", error=str(exc)))
+            finally:
+                self._file_sending = False
+                QTimer.singleShot(0, self._refresh_send_file_button)
+
+        threading.Thread(target=worker, name="host-file-send", daemon=True).start()
+
     def _stop_host(self) -> None:
         self._stop_host_clipboard()
+        self._stop_host_files()
         host = self._host
         self._host = None
         if host:
@@ -964,14 +1104,17 @@ class MainWindow(QMainWindow):
         self.lbl_host_state.setText(i18n.t("host_off"))
         self._restyle(self.lbl_host_state, "hostWarn")
         self._set_status(i18n.t("host_stopped"))
+        self._refresh_send_file_button()
 
     def _on_host_crashed(self) -> None:
         self._stop_host_clipboard()
+        self._stop_host_files()
         self._host = None
         self.btn_host.setText(i18n.t("start_host"))
         self._restyle(self.btn_host, "primary")
         self.lbl_host_state.setText(i18n.t("host_crashed"))
         self._restyle(self.lbl_host_state, "hostDanger")
+        self._refresh_send_file_button()
         show_error(self, title=i18n.t("error"), message=i18n.t("host_crash_msg"))
 
     def _quick_connect(self) -> None:

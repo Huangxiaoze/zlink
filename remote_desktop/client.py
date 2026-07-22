@@ -3,13 +3,20 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, Optional, Tuple
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Tuple, Set
 
 from . import PROTOCOL_VERSION
 from .clipboard_sync import ClipboardBridge
 from .config import ClientConfig
 from .app_icon import apply_app_icon
-from .confirm_dialog import ask_confirm
+from .confirm_dialog import ask_confirm, show_warning
+from .file_transfer import (
+    FEATURE_FILE_TRANSFER,
+    FileAssembler,
+    MAX_FILE_BYTES,
+    send_file,
+)
 from .themes import CURRENT
 from .window_chrome import apply_window_chrome, ensure_windows_app_id
 from .i18n import i18n
@@ -35,6 +42,7 @@ from .qt_bind import (
     PointingHandCursor,
     WA_StyledBackground,
     QApplication,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QImage,
@@ -76,6 +84,10 @@ class FrameBus(QObject):
     start_clipboard = Signal()
     stop_clipboard = Signal()
     clipboard_payload = Signal(object)
+    start_file_xfer = Signal(object)  # features list/tuple
+    stop_file_xfer = Signal()
+    file_payload = Signal(object)
+    file_progress = Signal(str)
 
 
 class RemoteCanvas(QWidget):
@@ -230,12 +242,13 @@ class RemoteCanvas(QWidget):
 
 
 class ViewerChromeBar(QFrame):
-    """Top-edge pull-down control: fullscreen / exit fullscreen (right-aligned)."""
+    """Top-edge pull-down control: send file + fullscreen."""
 
     def __init__(
         self,
         parent: QWidget,
         on_toggle: Callable[[], None],
+        on_send_file: Callable[[], None],
         on_hover: Callable[[bool], None],
     ) -> None:
         super().__init__(parent)
@@ -244,9 +257,18 @@ class ViewerChromeBar(QFrame):
         # Colors come from the app stylesheet (themes.py) so settings theme changes apply.
         self.setAttribute(WA_StyledBackground, True)
         lay = QHBoxLayout(self)
-        # Keep the action near the window caption buttons (minimize/close).
         lay.setContentsMargins(12, 8, 18, 10)
+        lay.setSpacing(8)
+
+        self.btn_send = QPushButton(i18n.t("viewer_send_file"))
+        self.btn_send.setObjectName("viewerChromeBtn")
+        self.btn_send.setCursor(PointingHandCursor)
+        self.btn_send.setFocusPolicy(NoFocus)
+        self.btn_send.clicked.connect(on_send_file)
+        lay.addWidget(self.btn_send)
         lay.addStretch(1)
+
+        # Keep fullscreen near the window caption buttons (minimize/close).
         self.btn_action = QPushButton(i18n.t("viewer_fullscreen"))
         self.btn_action.setObjectName("viewerChromeBtn")
         self.btn_action.setCursor(PointingHandCursor)
@@ -282,6 +304,10 @@ class RemoteClientWindow(QMainWindow):
         self._swallow_esc_up = False
         self._chrome_edge_px = 10
         self._chrome_hover = False
+        self._features: Set[str] = set()
+        self._file_assembler: Optional[FileAssembler] = None
+        self._file_sending = False
+        self._file_send_stop = threading.Event()
         # Set by main window when quitting the whole app (skip confirm once).
         self.force_close = False
 
@@ -307,6 +333,7 @@ class RemoteClientWindow(QMainWindow):
         self.chrome_bar = ViewerChromeBar(
             self._central,
             on_toggle=self._toggle_fullscreen,
+            on_send_file=self._pick_and_send_file,
             on_hover=self._on_chrome_hover,
         )
         self._chrome_hide_timer = QTimer(self)
@@ -319,6 +346,10 @@ class RemoteClientWindow(QMainWindow):
         self._bus.start_clipboard.connect(self._on_start_clipboard)
         self._bus.stop_clipboard.connect(self._stop_clipboard)
         self._bus.clipboard_payload.connect(self._on_clipboard_payload)
+        self._bus.start_file_xfer.connect(self._on_start_file_xfer)
+        self._bus.stop_file_xfer.connect(self._on_stop_file_xfer)
+        self._bus.file_payload.connect(self._on_file_payload)
+        self._bus.file_progress.connect(self._on_status)
 
         self._present_timer = QTimer(self)
         self._present_timer.setInterval(16)
@@ -394,6 +425,9 @@ class RemoteClientWindow(QMainWindow):
             self.chrome_bar.btn_action.setText(i18n.t("viewer_exit_fullscreen"))
         else:
             self.chrome_bar.btn_action.setText(i18n.t("viewer_fullscreen"))
+        self.chrome_bar.btn_send.setText(i18n.t("viewer_send_file"))
+        can_send = FEATURE_FILE_TRANSFER in self._features and not self._file_sending
+        self.chrome_bar.btn_send.setEnabled(can_send)
         w = max(1, self._central.width())
         self.chrome_bar.setGeometry(0, 0, w, 48)
         self.chrome_bar.raise_()
@@ -524,8 +558,12 @@ class RemoteClientWindow(QMainWindow):
                 raise ProtocolError(i18n.t("viewer_auth_failed"))
             raise ProtocolError(reason)
 
+        features = ack.get("features") or []
+        if not isinstance(features, (list, tuple)):
+            features = []
         session_stop = threading.Event()
         self._bus.start_clipboard.emit()
+        self._bus.start_file_xfer.emit(list(features))
         self._bus.status.emit("")  # connected: clear title suffix
 
         hb = threading.Thread(
@@ -546,12 +584,15 @@ class RemoteClientWindow(QMainWindow):
                     self._bus.frame_jpeg.emit(jpeg, meta)
                 elif fr.type == MsgType.CLIPBOARD:
                     self._bus.clipboard_payload.emit(fr.payload)
+                elif fr.type == MsgType.FILE:
+                    self._bus.file_payload.emit(fr.payload)
                 elif fr.type == MsgType.HEARTBEAT:
                     continue
                 elif fr.type == MsgType.BYE:
                     break
         finally:
             session_stop.set()
+            self._bus.stop_file_xfer.emit()
             self._bus.stop_clipboard.emit()
             conn.close()
             if self._conn is conn:
@@ -576,6 +617,102 @@ class RemoteClientWindow(QMainWindow):
     def _on_clipboard_payload(self, payload: object) -> None:
         if self._clip is not None and payload is not None:
             self._clip.handle_remote_payload(bytes(payload))
+
+    def _on_start_file_xfer(self, features: object) -> None:
+        self._on_stop_file_xfer()
+        feat_list = features if isinstance(features, (list, tuple)) else []
+        self._features = {str(x) for x in feat_list}
+        self._file_send_stop.clear()
+        self._file_assembler = FileAssembler(
+            on_progress=self._on_file_recv_progress,
+            on_complete=self._on_file_recv_complete,
+            on_error=lambda err: self._bus.file_progress.emit(
+                i18n.t("file_transfer_failed", error=err)
+            ),
+        )
+
+    def _on_stop_file_xfer(self) -> None:
+        self._file_send_stop.set()
+        self._file_sending = False
+        self._features = set()
+        if self._file_assembler is not None:
+            self._file_assembler.clear()
+            self._file_assembler = None
+
+    def _on_file_payload(self, payload: object) -> None:
+        if self._file_assembler is not None and payload is not None:
+            self._file_assembler.handle_payload(bytes(payload))
+
+    def _on_file_recv_progress(self, name: str, received: int, total: int) -> None:
+        pct = 100 if total <= 0 else min(100, int(received * 100 / total))
+        self._bus.file_progress.emit(i18n.t("file_receiving", name=name, pct=pct))
+
+    def _on_file_recv_complete(self, path: Path) -> None:
+        self._bus.file_progress.emit(i18n.t("file_received", name=path.name))
+        self._bus.file_progress.emit(i18n.t("file_saved_to", path=str(path)))
+
+    def _send_file_packet(self, packet: bytes) -> None:
+        conn = self._conn
+        if conn is None or conn.closed:
+            raise ConnectionError("not connected")
+        conn.send_raw(packet)
+
+    def _pick_and_send_file(self) -> None:
+        if FEATURE_FILE_TRANSFER not in self._features:
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_unsupported"))
+            return
+        if self._file_sending:
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("file_transfer_busy"))
+            return
+        path, _filter = QFileDialog.getOpenFileName(self, i18n.t("send_file_pick"), str(Path.home()))
+        if not path:
+            return
+        src = Path(path)
+        if not src.is_file():
+            return
+        if src.stat().st_size > MAX_FILE_BYTES:
+            show_warning(
+                self,
+                title=i18n.t("tip"),
+                message=i18n.t("file_too_large", name=src.name),
+            )
+            return
+
+        self._file_sending = True
+        self._file_send_stop.clear()
+        self.chrome_bar.btn_send.setEnabled(False)
+        self._bus.file_progress.emit(i18n.t("file_sending", name=src.name, pct=0))
+
+        def worker() -> None:
+            try:
+                send_file(
+                    src,
+                    self._send_file_packet,
+                    on_progress=lambda name, done, total: self._bus.file_progress.emit(
+                        i18n.t(
+                            "file_sending",
+                            name=name,
+                            pct=(100 if total <= 0 else min(100, int(done * 100 / total))),
+                        )
+                    ),
+                    should_stop=lambda: self._file_send_stop.is_set() or self._stop.is_set(),
+                )
+                self._bus.file_progress.emit(i18n.t("file_sent", name=src.name))
+            except InterruptedError:
+                self._bus.file_progress.emit(i18n.t("file_transfer_failed", error="cancelled"))
+            except Exception as exc:
+                log.exception("send file failed")
+                self._bus.file_progress.emit(i18n.t("file_transfer_failed", error=str(exc)))
+            finally:
+                self._file_sending = False
+                # Re-enable button on GUI thread via status update path.
+                QTimer.singleShot(0, self._refresh_send_button)
+
+        threading.Thread(target=worker, name="client-file-send", daemon=True).start()
+
+    def _refresh_send_button(self) -> None:
+        can_send = FEATURE_FILE_TRANSFER in self._features and not self._file_sending
+        self.chrome_bar.btn_send.setEnabled(can_send)
 
     def _heartbeat_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         interval = self.config.net.heartbeat_interval_s

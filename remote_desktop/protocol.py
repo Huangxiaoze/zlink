@@ -22,6 +22,7 @@ class MsgType(IntEnum):
     HEARTBEAT = 7
     BYE = 8
     CLIPBOARD = 9
+    FILE = 10
 
 
 class ProtocolError(ValueError):
@@ -102,4 +103,13 @@ def pack_clipboard_message(meta: dict[str, Any], blob: bytes = b"") -> bytes:
 
 
 def unpack_clipboard_message(payload: bytes) -> tuple[dict[str, Any], bytes]:
+    return unpack_frame_message(payload)
+
+
+def pack_file_message(meta: dict[str, Any], blob: bytes = b"") -> bytes:
+    payload = json.dumps(meta, separators=(",", ":")).encode("utf-8") + b"\n\n" + blob
+    return pack_frame(MsgType.FILE, payload)
+
+
+def unpack_file_message(payload: bytes) -> tuple[dict[str, Any], bytes]:
     return unpack_frame_message(payload)

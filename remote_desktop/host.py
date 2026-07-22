@@ -27,10 +27,14 @@ class RemoteHost:
         # GUI/main-thread clipboard bridge exchanges packed CLIPBOARD payloads here.
         self.clipboard_out: queue.Queue = queue.Queue(maxsize=128)
         self.clipboard_in: queue.Queue = queue.Queue(maxsize=128)
+        # Dedicated file transfer queues (do not block recv on apply).
+        self.file_out: queue.Queue = queue.Queue(maxsize=256)
+        self.file_in: queue.Queue = queue.Queue(maxsize=256)
         # GUI sets this after applying a clipboard packet on the Qt thread.
         self.clipboard_applied = threading.Event()
         # Optional wakeup for GUI (e.g. Qt Signal.emit) — called from recv thread.
         self.clipboard_notify: Optional[Callable[[], None]] = None
+        self.file_notify: Optional[Callable[[], None]] = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -59,8 +63,8 @@ class RemoteHost:
         finally:
             self.stop()
 
-    def _clear_clipboard_queues(self) -> None:
-        for q in (self.clipboard_out, self.clipboard_in):
+    def _clear_session_queues(self) -> None:
+        for q in (self.clipboard_out, self.clipboard_in, self.file_out, self.file_in):
             while True:
                 try:
                     q.get_nowait()
@@ -81,7 +85,7 @@ class RemoteHost:
         watchdog: threading.Thread | None = None
         session_stop = threading.Event()
         injector: InputInjector | None = None
-        self._clear_clipboard_queues()
+        self._clear_session_queues()
 
         try:
             if not self._handshake(conn):
@@ -111,7 +115,7 @@ class RemoteHost:
         finally:
             session_stop.set()
             self.session_live.clear()
-            self._clear_clipboard_queues()
+            self._clear_session_queues()
             try:
                 conn.send_json(MsgType.BYE, {"reason": "host_close"})
             except Exception:
@@ -150,7 +154,7 @@ class RemoteHost:
                 "screen_w": self._capturer.src_width,
                 "screen_h": self._capturer.src_height,
                 "version": PROTOCOL_VERSION,
-                "features": ["clipboard"],
+                "features": ["clipboard", "file_transfer"],
             },
         )
         return True
@@ -174,11 +178,16 @@ class RemoteHost:
             stream.scale,
         )
 
-    def _flush_clipboard_out(self, conn: Connection, session_stop: threading.Event) -> bool:
-        """Send pending clipboard packets (reliable). False if connection died."""
+    def _flush_reliable_out(
+        self,
+        conn: Connection,
+        session_stop: threading.Event,
+        out_q: queue.Queue,
+    ) -> bool:
+        """Send pending reliable packets. False if connection died."""
         while not session_stop.is_set():
             try:
-                packet = self.clipboard_out.get_nowait()
+                packet = out_q.get_nowait()
             except queue.Empty:
                 return True
             try:
@@ -192,7 +201,10 @@ class RemoteHost:
         last_adapt = time.monotonic()
         send_failures = 0
         while not session_stop.is_set() and not self._stop.is_set():
-            if not self._flush_clipboard_out(conn, session_stop):
+            if not self._flush_reliable_out(conn, session_stop, self.clipboard_out):
+                session_stop.set()
+                break
+            if not self._flush_reliable_out(conn, session_stop, self.file_out):
                 session_stop.set()
                 break
 
@@ -308,6 +320,18 @@ class RemoteHost:
                         log.exception("clipboard_notify failed")
                     if not self.clipboard_applied.wait(timeout=1.0):
                         log.warning("clipboard apply timeout")
+            elif frame.type == MsgType.FILE:
+                try:
+                    self.file_in.put_nowait(frame.payload)
+                except queue.Full:
+                    log.warning("file_in full, drop packet")
+                    continue
+                notify = self.file_notify
+                if notify is not None:
+                    try:
+                        notify()
+                    except Exception:
+                        log.exception("file_notify failed")
             elif frame.type == MsgType.HEARTBEAT:
                 continue
             elif frame.type == MsgType.BYE:
