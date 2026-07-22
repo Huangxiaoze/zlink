@@ -50,6 +50,6 @@ class HostConfig:
 class ClientConfig:
     net: NetConfig
     stream: StreamConfig
-    window_title: str = "LeafLink"
+    window_title: str = "ZLink"
     reconnect: bool = True
     reconnect_max_s: float = 15.0

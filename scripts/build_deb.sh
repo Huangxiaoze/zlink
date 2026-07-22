@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Build LeafLink on Ubuntu/Debian and produce an installable .deb
+# Build ZLink on Ubuntu/Debian and produce an installable .deb
 #
 # Usage (from repo root `remote/`):
 #   bash scripts/build_deb.sh
 #   bash scripts/build_deb.sh --console          # keep terminal for debug
-#   DEB_ONLY=1 bash scripts/build_deb.sh        # reuse existing dist/LeafLink
+#   DEB_ONLY=1 bash scripts/build_deb.sh        # reuse existing dist/ZLink
 #
 # Output:
-#   dist/LeafLink/LeafLink
-#   dist/leaflink_<version>_<arch>.deb
+#   dist/ZLink/ZLink
+#   dist/zlink_<version>_<arch>.deb
 #
 # Install:
-#   sudo apt install ./dist/leaflink_*.deb
+#   sudo apt install ./dist/zlink_*.deb
 #   # or
-#   sudo dpkg -i ./dist/leaflink_*.deb && sudo apt-get install -f -y
+#   sudo dpkg -i ./dist/zlink_*.deb && sudo apt-get install -f -y
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -50,6 +50,6 @@ else
 fi
 
 echo ""
-echo "App    : dist/LeafLink/LeafLink"
-echo "Package: dist/leaflink_*.deb"
-ls -lh dist/leaflink_*.deb 2>/dev/null || true
+echo "App    : dist/ZLink/ZLink"
+echo "Package: dist/zlink_*.deb"
+ls -lh dist/zlink_*.deb 2>/dev/null || true

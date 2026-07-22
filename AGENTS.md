@@ -134,7 +134,7 @@ remote/
     app_gui.py              # Qt 设备管理界面（卡片列表）
     client.py               # Qt 远程画面（防闪烁）
     clipboard_sync.py       # 文字/文件剪贴板同步（Ctrl+Alt+C 推送 / Ctrl+Alt+V 拉取）
-    file_transfer.py        # 专用远程文件传输（MsgType.FILE，落盘 Downloads/LeafLink）
+    file_transfer.py        # 专用远程文件传输（MsgType.FILE，落盘 Downloads/ZLink）
     remote_files.py         # 控制端远程文件浏览器（list/download）
   scripts/build.py          # PyInstaller 跨平台打包入口
   scripts/build_windows.ps1

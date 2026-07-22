@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build LeafLink.app on macOS
+# Build ZLink.app on macOS
 # Usage:  bash scripts/build_macos.sh
 # Note: Accessibility permission is still required for input injection at runtime.
 
@@ -17,8 +17,8 @@ fi
 .venv/bin/python scripts/build.py --clean "$@"
 
 echo ""
-if [[ -d dist/LeafLink.app ]]; then
-  echo "Output: dist/LeafLink.app"
+if [[ -d dist/ZLink.app ]]; then
+  echo "Output: dist/ZLink.app"
 else
-  echo "Output: dist/LeafLink/LeafLink"
+  echo "Output: dist/ZLink/ZLink"
 fi

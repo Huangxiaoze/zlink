@@ -1,6 +1,6 @@
-# Build LeafLink for Windows:
-#   1) PyInstaller onedir  -> dist\LeafLink\LeafLink.exe
-#   2) Inno Setup installer -> dist\LeafLink-Setup-<version>.exe
+# Build ZLink for Windows:
+#   1) PyInstaller onedir  -> dist\ZLink\ZLink.exe
+#   2) Inno Setup installer -> dist\ZLink-Setup-<version>.exe
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
@@ -81,13 +81,13 @@ if ($wantInstaller) {
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-if (Test-Path "dist\LeafLink\LeafLink.exe") {
-    Write-Host "App     : dist\LeafLink\LeafLink.exe"
+if (Test-Path "dist\ZLink\ZLink.exe") {
+    Write-Host "App     : dist\ZLink\ZLink.exe"
 }
-$setup = Get-ChildItem "dist\LeafLink-Setup-*.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$setup = Get-ChildItem "dist\ZLink-Setup-*.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($setup) {
     Write-Host "Installer: $($setup.FullName)"
 }
-elseif ($OneFile -and (Test-Path "dist\LeafLink.exe")) {
-    Write-Host "Portable : dist\LeafLink.exe"
+elseif ($OneFile -and (Test-Path "dist\ZLink.exe")) {
+    Write-Host "Portable : dist\ZLink.exe"
 }

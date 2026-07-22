@@ -50,7 +50,7 @@ sudo apt install -y fonts-wqy-microhei
 - 远程画面防闪烁合帧渲染
 - 键鼠控制
 - **剪贴板同步**：文字/文件（≤64MB）
-- **远程文件传输**：独立通道互传文件（单文件 ≤64MB），保存到 `Downloads/LeafLink`
+- **远程文件传输**：独立通道互传文件（单文件 ≤64MB），保存到 `Downloads/ZLink`
 
 ### 文件传输怎么用
 
@@ -59,7 +59,7 @@ sudo apt install -y fonts-wqy-microhei
 | 控制端 → 被控端 | 远程窗口顶部滑出条点「发送文件」 |
 | 控制端 ← 被控端 | 远程窗口顶部滑出条点「浏览远程文件」，浏览并下载 |
 
-接收/下载的文件默认落在用户下载目录下的 `LeafLink` 文件夹；进度显示在窗口标题 / 状态栏。
+接收/下载的文件默认落在用户下载目录下的 `ZLink` 文件夹；进度显示在窗口标题 / 状态栏。
 
 ### 剪贴板怎么用
 
@@ -98,8 +98,8 @@ python main.py client --host <IP> --password <code>
 
 默认会生成：
 
-1. 应用目录：`dist/LeafLink/LeafLink.exe`
-2. 安装包：`dist/LeafLink-Setup-<version>.exe`（Inno Setup）
+1. 应用目录：`dist/ZLink/ZLink.exe`
+2. 安装包：`dist/ZLink-Setup-<version>.exe`（Inno Setup）
 
 ```powershell
 # 若尚未安装 Inno Setup 6，可让脚本自动安装：
@@ -136,21 +136,21 @@ bash scripts/build_deb.sh
 
 产物：
 
-1. 应用目录：`dist/LeafLink/LeafLink`
-2. 安装包：`dist/leaflink_<version>_<arch>.deb`
+1. 应用目录：`dist/ZLink/ZLink`
+2. 安装包：`dist/zlink_<version>_<arch>.deb`
 
 安装 / 卸载：
 
 ```bash
-sudo apt install ./dist/leaflink_*.deb
+sudo apt install ./dist/zlink_*.deb
 # 或
-sudo dpkg -i ./dist/leaflink_*.deb && sudo apt-get install -f -y
+sudo dpkg -i ./dist/zlink_*.deb && sudo apt-get install -f -y
 
-sudo apt remove leaflink
+sudo apt remove zlink
 ```
 
-安装后可从应用菜单启动 **LeafLink**，或命令行运行 `leaflink`。  
-若已有 `dist/LeafLink`、只想重打 deb：
+安装后可从应用菜单启动 **ZLink**，或命令行运行 `zlink`。  
+若已有 `dist/ZLink`、只想重打 deb：
 
 ```bash
 DEB_ONLY=1 bash scripts/build_deb.sh

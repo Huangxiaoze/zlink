@@ -30,7 +30,7 @@ MAX_FILES_PER_SYNC = 8
 
 
 def clipboard_temp_dir() -> Path:
-    path = Path(tempfile.gettempdir()) / "leaflink_clipboard"
+    path = Path(tempfile.gettempdir()) / "zlink_clipboard"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

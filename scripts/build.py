@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build LeafLink for the current platform with PyInstaller.
+"""Build ZLink for the current platform with PyInstaller.
 
 Usage (from repo root `remote/`):
   python scripts/build.py
@@ -26,9 +26,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 SCRIPTS = ROOT / "scripts"
-NAME = "LeafLink"
-PKG_NAME = "leaflink"
-ISS = SCRIPTS / "windows" / "leaflink.iss"
+NAME = "ZLink"
+PKG_NAME = "zlink"
+ISS = SCRIPTS / "windows" / "zlink.iss"
 ICON_PNG = ROOT / "resources" / "icon" / "app.png"
 ICON_ICO = ROOT / "resources" / "icon" / "app.ico"
 OPT_DIR = "/opt/%s" % PKG_NAME
@@ -308,7 +308,7 @@ def _build_deb(version: str) -> int:
             Source: https://github.com/Huangxiaoze/remote_desktop
 
             Files: *
-            Copyright: LeafLink contributors
+            Copyright: ZLink contributors
             License: Proprietary
              See the upstream repository for license terms.
             """
@@ -324,13 +324,13 @@ def _build_deb(version: str) -> int:
         Section: net
         Priority: optional
         Architecture: %s
-        Maintainer: LeafLink Maintainers <leaflink@users.noreply.github.com>
+        Maintainer: ZLink Maintainers <zlink@users.noreply.github.com>
         Installed-Size: %d
         Depends: libc6, libx11-6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libxcb-xinerama0, libglib2.0-0, libdbus-1-3, libfontconfig1, libfreetype6, libxrender1, libxi6, libsm6, libice6, libgl1 | libgl1-mesa-glx
         Recommends: fonts-noto-cjk | fonts-wqy-microhei
         Homepage: https://github.com/Huangxiaoze/remote_desktop
         Description: Cross-platform remote desktop (host + client)
-         LeafLink provides a Qt device-manager GUI for hosting and
+         ZLink provides a Qt device-manager GUI for hosting and
          controlling remote desktops over a direct TCP connection.
         """
         % (PKG_NAME, version, arch, installed_size)
@@ -400,7 +400,7 @@ def _build_deb(version: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Build LeafLink executable / Windows installer / Ubuntu .deb"
+        description="Build ZLink executable / Windows installer / Ubuntu .deb"
     )
     parser.add_argument(
         "--console",
@@ -431,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--deb-only",
         action="store_true",
-        help="Linux only: skip PyInstaller and only assemble .deb from dist/LeafLink",
+        help="Linux only: skip PyInstaller and only assemble .deb from dist/ZLink",
     )
     args = parser.parse_args(argv)
 

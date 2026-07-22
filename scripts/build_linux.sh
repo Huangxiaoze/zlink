@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build LeafLink on Linux
+# Build ZLink on Linux
 # Usage:  bash scripts/build_linux.sh
 
 set -euo pipefail
@@ -16,5 +16,5 @@ fi
 .venv/bin/python scripts/build.py --clean "$@"
 
 echo ""
-echo "Output: dist/LeafLink/LeafLink"
+echo "Output: dist/ZLink/ZLink"
 echo "Tip   : for an installable .deb, run: bash scripts/build_deb.sh"

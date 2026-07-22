@@ -1,4 +1,4 @@
-"""UI themes for LeafLink device manager — every color comes from the palette."""
+"""UI themes for ZLink device manager — every color comes from the palette."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Dict, Iterable, Tuple
 def _combo_arrow_url(color: str) -> str:
     """Write a themed chevron SVG once and return a Qt-friendly file URL."""
     safe = "".join(ch for ch in color if ch.isalnum())
-    cache = Path(tempfile.gettempdir()) / "leaflink_theme"
+    cache = Path(tempfile.gettempdir()) / "zlink_theme"
     cache.mkdir(parents=True, exist_ok=True)
     path = cache / ("combo_arrow_%s.svg" % safe)
     if not path.exists():

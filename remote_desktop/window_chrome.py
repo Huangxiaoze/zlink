@@ -11,7 +11,7 @@ from .qt_bind import QEvent, QObject, qt_enum_eq
 from .themes import CURRENT, ThemeColors
 
 
-_APP_ID = "LeafLink.RemoteDesktop.App"
+_APP_ID = "ZLink.RemoteDesktop.App"
 _Show = getattr(QEvent, "Show", None) or getattr(getattr(QEvent, "Type", None), "Show", None)
 
 
@@ -97,11 +97,11 @@ def apply_window_chrome(window: Any, theme: Optional[ThemeColors] = None) -> Non
 
 def bind_themed_chrome(window: Any) -> None:
     """Keep title-bar theme in sync for dialogs (applied on every Show)."""
-    if getattr(window, "_leaflink_chrome_filter", None) is not None:
+    if getattr(window, "_zlink_chrome_filter", None) is not None:
         return
     filt = _ChromeEventFilter(window)
     window.installEventFilter(filt)
-    window._leaflink_chrome_filter = filt
+    window._zlink_chrome_filter = filt
     # Apply immediately if the native handle already exists.
     try:
         if int(window.winId()) != 0:

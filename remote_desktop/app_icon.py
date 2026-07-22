@@ -1,4 +1,4 @@
-"""Resolve and load the LeafLink application icon (dev + frozen builds)."""
+"""Resolve and load the ZLink application icon (dev + frozen builds)."""
 
 from __future__ import annotations
 

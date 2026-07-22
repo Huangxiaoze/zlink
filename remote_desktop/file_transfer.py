@@ -24,18 +24,18 @@ FEATURE_FILE_TRANSFER = "file_transfer"
 
 
 def transfer_dir() -> Path:
-    """Prefer the user's Downloads/LeafLink folder; fall back to temp."""
+    """Prefer the user's Downloads/ZLink folder; fall back to temp."""
     home = Path.home()
     for candidate in (
-        home / "Downloads" / "LeafLink",
-        home / "下载" / "LeafLink",
+        home / "Downloads" / "ZLink",
+        home / "下载" / "ZLink",
     ):
         try:
             candidate.mkdir(parents=True, exist_ok=True)
             return candidate
         except OSError:
             continue
-    path = Path(tempfile.gettempdir()) / "leaflink_transfer"
+    path = Path(tempfile.gettempdir()) / "zlink_transfer"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
