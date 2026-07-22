@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 
@@ -47,6 +48,7 @@ from .qt_bind import (
 )
 
 from .client import RemoteClientWindow
+from .clipboard_sync import ClipboardBridge
 from .config import ClientConfig, HostConfig, NetConfig, StreamConfig
 from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_online
 from .host import RemoteHost
@@ -364,6 +366,8 @@ class MainWindow(QMainWindow):
         self._host_thread: threading.Thread | None = None
         self._probe_stop = threading.Event()
         self._viewers: list[RemoteClientWindow] = []
+        self._host_clip: ClipboardBridge | None = None
+        self._host_clip_timer: QTimer | None = None
 
         self.probe_done.connect(self._apply_probe)
         self.host_crashed.connect(self._on_host_crashed)
@@ -765,6 +769,7 @@ class MainWindow(QMainWindow):
 
         self._host_thread = threading.Thread(target=runner, name="gui-host", daemon=True)
         self._host_thread.start()
+        self._start_host_clipboard()
         self.btn_host.setText(i18n.t("stop_host"))
         self.btn_host.setObjectName("danger")
         self.btn_host.style().unpolish(self.btn_host)
@@ -773,7 +778,53 @@ class MainWindow(QMainWindow):
         self.lbl_host_state.setStyleSheet("color:#7DFFCE; font-size:12px; font-weight:600;")
         self._set_status(i18n.t("host_started", port=port))
 
+    def _enqueue_host_clipboard(self, packet: bytes) -> None:
+        host = self._host
+        if host is None or not host.session_live.is_set():
+            return
+        try:
+            host.clipboard_out.put_nowait(packet)
+        except queue.Full:
+            log.warning("host clipboard_out full")
+
+    def _start_host_clipboard(self) -> None:
+        self._stop_host_clipboard()
+        self._host_clip = ClipboardBridge(
+            send_packet=self._enqueue_host_clipboard,
+            enabled_check=lambda: self._host is not None and self._host.session_live.is_set(),
+            parent=self,
+        )
+        self._host_clip.status.connect(self._set_status)
+        self._host_clip.start()
+        self._host_clip_timer = QTimer(self)
+        self._host_clip_timer.setInterval(100)
+        self._host_clip_timer.timeout.connect(self._drain_host_clipboard_in)
+        self._host_clip_timer.start()
+
+    def _drain_host_clipboard_in(self) -> None:
+        host = self._host
+        bridge = self._host_clip
+        if host is None or bridge is None:
+            return
+        while True:
+            try:
+                payload = host.clipboard_in.get_nowait()
+            except queue.Empty:
+                break
+            bridge.handle_remote_payload(payload)
+
+    def _stop_host_clipboard(self) -> None:
+        if self._host_clip_timer is not None:
+            self._host_clip_timer.stop()
+            self._host_clip_timer.deleteLater()
+            self._host_clip_timer = None
+        if self._host_clip is not None:
+            self._host_clip.stop()
+            self._host_clip.deleteLater()
+            self._host_clip = None
+
     def _stop_host(self) -> None:
+        self._stop_host_clipboard()
         host = self._host
         self._host = None
         if host:
@@ -787,6 +838,7 @@ class MainWindow(QMainWindow):
         self._set_status(i18n.t("host_stopped"))
 
     def _on_host_crashed(self) -> None:
+        self._stop_host_clipboard()
         self._host = None
         self.btn_host.setText(i18n.t("start_host"))
         self.btn_host.setObjectName("primary")
@@ -897,6 +949,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._probe_stop.set()
+        self._stop_host_clipboard()
         if self._host is not None:
             self._stop_host()
         for win in list(self._viewers):

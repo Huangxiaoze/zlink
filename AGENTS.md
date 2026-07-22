@@ -21,7 +21,7 @@
 - 完整商业级安全（端到端审计、证书体系、权限细粒度控制）
 - WebRTC / 硬件编码（NVENC/VideoToolbox）优先路径
 - 公网识别码解析（无中继时识别码仅为本地展示标识）
-- 剪贴板同步、多显示器选择 UI、文件传输（预留协议扩展位）
+- 多显示器选择 UI、任意目录大文件传输（剪贴板文件有大小上限）
 
 ## 2. 架构决策（思考结论）
 
@@ -131,6 +131,7 @@ remote/
     qt_fonts.py             # CJK 字体选择
     app_gui.py              # Qt 设备管理界面
     client.py               # Qt 远程画面（防闪烁）
+    clipboard_sync.py       # 文字/文件剪贴板同步
   requirements-ubuntu1804.txt  # 18.04 钉扎依赖
 ```
 
@@ -159,8 +160,15 @@ magic = b"RD01"
 | QUALITY | C→H | JSON：`{jpeg_quality, scale, max_fps}` |
 | HEARTBEAT | 双向 | JSON：`{t}` |
 | BYE | 双向 | JSON：`{reason}` |
+| CLIPBOARD | 双向 | JSON meta + `\n\n` + blob（文字 UTF-8 或文件分片） |
 
-坐标使用 **相对屏幕归一化** `[0.0, 1.0]`，避免双方分辨率不一致。
+CLIPBOARD meta：
+
+- 文字：`{"kind":"text"}`，blob 为 UTF-8 文本（≤2MiB）
+- 文件：`{"kind":"file","id","name","size","offset","done"}`，blob 为分片（单文件≤64MiB）
+
+坐标使用 **相对屏幕归一化** `[0.0, 1.0]`，避免双方分辨率不一致。  
+`PROTOCOL_VERSION = 2`（含剪贴板）。
 
 ### 4.3 扩展规则
 
@@ -183,7 +191,7 @@ magic = b"RD01"
 - I/O 与 CPU（编码）分离线程；共享状态用 `queue.Queue(maxsize=...)` 或锁
 - 跨线程停止统一用 `threading.Event`
 - 不在持锁时做网络阻塞调用
-- 发送路径：**可丢弃旧 FRAME**；控制消息（MOUSE/KEY/HEARTBEAT）尽量不丢
+- 发送路径：**可丢弃旧 FRAME**；控制消息（MOUSE/KEY/HEARTBEAT/CLIPBOARD）不丢
 
 ### 5.3 错误处理
 

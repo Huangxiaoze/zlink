@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 from typing import Any
@@ -22,9 +23,14 @@ class RemoteHost:
         self.stream = config.stream.clamp()
         self._capturer = ScreenCapturer(self.stream)
         self._session_lock = threading.Lock()
+        self.session_live = threading.Event()
+        # GUI/main-thread clipboard bridge exchanges packed CLIPBOARD payloads here.
+        self.clipboard_out: queue.Queue = queue.Queue(maxsize=128)
+        self.clipboard_in: queue.Queue = queue.Queue(maxsize=128)
 
     def stop(self) -> None:
         self._stop.set()
+        self.session_live.clear()
         self._capturer.stop()
 
     def run(self) -> None:
@@ -33,7 +39,6 @@ class RemoteHost:
                 raise ValueError("password is required when binding on all interfaces")
 
         self._capturer.start()
-        # Wait briefly for first capture to learn screen size
         for _ in range(50):
             if self._capturer.src_width > 0:
                 break
@@ -50,6 +55,14 @@ class RemoteHost:
         finally:
             self.stop()
 
+    def _clear_clipboard_queues(self) -> None:
+        for q in (self.clipboard_out, self.clipboard_in):
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+
     def _handle_client(self, conn: Connection, addr: tuple) -> None:
         if not self._session_lock.acquire(blocking=False):
             log.warning("reject %s: session busy", addr)
@@ -64,11 +77,13 @@ class RemoteHost:
         watchdog: threading.Thread | None = None
         session_stop = threading.Event()
         injector: InputInjector | None = None
+        self._clear_clipboard_queues()
 
         try:
             if not self._handshake(conn):
                 return
 
+            self.session_live.set()
             injector = InputInjector(self._capturer.src_width, self._capturer.src_height)
             sender = threading.Thread(
                 target=self._send_loop,
@@ -91,6 +106,8 @@ class RemoteHost:
             log.exception("session crashed %s", addr)
         finally:
             session_stop.set()
+            self.session_live.clear()
+            self._clear_clipboard_queues()
             try:
                 conn.send_json(MsgType.BYE, {"reason": "host_close"})
             except Exception:
@@ -109,7 +126,8 @@ class RemoteHost:
             conn.send_json(MsgType.HELLO_ACK, {"ok": False, "reason": "expected_hello"})
             return False
         hello = decode_json(frame.payload)
-        if int(hello.get("version", -1)) != PROTOCOL_VERSION:
+        client_ver = int(hello.get("version", -1))
+        if client_ver != PROTOCOL_VERSION:
             conn.send_json(MsgType.HELLO_ACK, {"ok": False, "reason": "version_mismatch"})
             return False
         if not password_matches(self.config.net.password, str(hello.get("password", ""))):
@@ -117,7 +135,6 @@ class RemoteHost:
             log.warning("auth failed")
             return False
 
-        # Optional initial quality from client
         q = hello.get("quality")
         if isinstance(q, dict):
             self._apply_quality(q)
@@ -129,6 +146,7 @@ class RemoteHost:
                 "screen_w": self._capturer.src_width,
                 "screen_h": self._capturer.src_height,
                 "version": PROTOCOL_VERSION,
+                "features": ["clipboard"],
             },
         )
         return True
@@ -152,12 +170,28 @@ class RemoteHost:
             stream.scale,
         )
 
+    def _flush_clipboard_out(self, conn: Connection, session_stop: threading.Event) -> bool:
+        """Send pending clipboard packets (reliable). False if connection died."""
+        while not session_stop.is_set():
+            try:
+                packet = self.clipboard_out.get_nowait()
+            except queue.Empty:
+                return True
+            try:
+                conn.send_raw(packet)
+            except (ConnectionError, OSError):
+                return False
+        return True
+
     def _send_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         pending_bytes = 0
         last_adapt = time.monotonic()
         send_failures = 0
         while not session_stop.is_set() and not self._stop.is_set():
-            # Keep host→client heartbeat even when capture has no new frame.
+            if not self._flush_clipboard_out(conn, session_stop):
+                session_stop.set()
+                break
+
             now = time.monotonic()
             if (now - conn.last_tx) >= self.config.net.heartbeat_interval_s:
                 try:
@@ -178,13 +212,11 @@ class RemoteHost:
                 quality=frame.quality,
                 scale=frame.scale,
             )
-            # Drop stale frames under congestion instead of blocking forever.
             if not conn.try_send_raw(packet):
                 send_failures += 1
                 if conn.closed or send_failures >= 8:
                     session_stop.set()
                     break
-                # Force quality down quickly when sends keep failing/timing out.
                 self._apply_quality(
                     {
                         "max_fps": max(10.0, self.stream.max_fps - 5),
@@ -255,9 +287,12 @@ class RemoteHost:
                 injector.handle_key(decode_json(frame.payload))
             elif frame.type == MsgType.QUALITY:
                 self._apply_quality(decode_json(frame.payload))
+            elif frame.type == MsgType.CLIPBOARD:
+                try:
+                    self.clipboard_in.put_nowait(frame.payload)
+                except queue.Full:
+                    log.warning("clipboard_in full, drop packet")
             elif frame.type == MsgType.HEARTBEAT:
-                # Receiving heartbeat already refreshes liveness; do not echo
-                # (echo caused multi-thread send races and traffic storms).
                 continue
             elif frame.type == MsgType.BYE:
                 session_stop.set()

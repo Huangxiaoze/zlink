@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from PySide2.QtCore import QObject, Qt, QTimer, Signal
+    from PySide2.QtCore import QMimeData, QObject, Qt, QTimer, QUrl, Signal
     from PySide2.QtGui import (
         QBrush,
+        QClipboard,
         QColor,
         QFont,
         QFontDatabase,
@@ -45,9 +46,10 @@ try:
 
     QT_API = "PySide2"
 except ImportError:  # pragma: no cover - modern hosts
-    from PySide6.QtCore import QObject, Qt, QTimer, Signal
+    from PySide6.QtCore import QMimeData, QObject, Qt, QTimer, QUrl, Signal
     from PySide6.QtGui import (
         QBrush,
+        QClipboard,
         QColor,
         QFont,
         QFontDatabase,

@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from . import PROTOCOL_VERSION
+from .clipboard_sync import ClipboardBridge
 from .config import ClientConfig
 from .i18n import i18n
 from .net import Connection, connect_to
@@ -51,6 +52,9 @@ class FrameBus(QObject):
     frame_jpeg = Signal(object, object)  # bytes, dict — object for PySide2 safety
     status = Signal(str)
     session_ended = Signal(str)
+    start_clipboard = Signal()
+    stop_clipboard = Signal()
+    clipboard_payload = Signal(object)
 
 
 class RemoteCanvas(QWidget):
@@ -180,6 +184,7 @@ class RemoteClientWindow(QMainWindow):
         self._hud_tick = 0
         self._last_mouse_move_ts = 0.0
         self._mouse_move_interval_s = 1.0 / 30.0  # throttle move flood
+        self._clip: Optional[ClipboardBridge] = None
 
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
@@ -203,6 +208,9 @@ class RemoteClientWindow(QMainWindow):
         self._bus.frame_jpeg.connect(self._on_frame_jpeg)
         self._bus.status.connect(self._on_status)
         self._bus.session_ended.connect(self._on_status)
+        self._bus.start_clipboard.connect(self._on_start_clipboard)
+        self._bus.stop_clipboard.connect(self._stop_clipboard)
+        self._bus.clipboard_payload.connect(self._on_clipboard_payload)
 
         self._present_timer = QTimer(self)
         self._present_timer.setInterval(16)
@@ -221,6 +229,7 @@ class RemoteClientWindow(QMainWindow):
 
     def _shutdown(self) -> None:
         self._stop.set()
+        self._stop_clipboard()
         conn = self._conn
         if conn:
             try:
@@ -229,6 +238,12 @@ class RemoteClientWindow(QMainWindow):
                 pass
             conn.close()
         self._present_timer.stop()
+
+    def _stop_clipboard(self) -> None:
+        if self._clip is not None:
+            self._clip.stop()
+            self._clip.deleteLater()
+            self._clip = None
 
     def _on_status(self, text: str) -> None:
         self.hud.setText(text)
@@ -309,6 +324,9 @@ class RemoteClientWindow(QMainWindow):
             raise ProtocolError(reason)
 
         session_stop = threading.Event()
+        self._bus.start_clipboard.emit()
+        self._bus.status.emit(i18n.t("clipboard_ready"))
+
         hb = threading.Thread(
             target=self._heartbeat_loop,
             args=(conn, session_stop),
@@ -325,16 +343,39 @@ class RemoteClientWindow(QMainWindow):
                 if fr.type == MsgType.FRAME:
                     meta, jpeg = unpack_frame_message(fr.payload)
                     self._bus.frame_jpeg.emit(jpeg, meta)
+                elif fr.type == MsgType.CLIPBOARD:
+                    self._bus.clipboard_payload.emit(fr.payload)
                 elif fr.type == MsgType.HEARTBEAT:
                     continue
                 elif fr.type == MsgType.BYE:
                     break
         finally:
             session_stop.set()
+            self._bus.stop_clipboard.emit()
             conn.close()
             if self._conn is conn:
                 self._conn = None
             hb.join(timeout=2.0)
+
+    def _on_start_clipboard(self) -> None:
+        self._stop_clipboard()
+
+        def send_packet(packet: bytes) -> None:
+            c = self._conn
+            if c is None or c.closed:
+                return
+            try:
+                c.send_raw(packet)
+            except (ConnectionError, OSError):
+                self._stop.set()
+
+        self._clip = ClipboardBridge(send_packet=send_packet, parent=self)
+        self._clip.status.connect(self._on_status)
+        self._clip.start()
+
+    def _on_clipboard_payload(self, payload: object) -> None:
+        if self._clip is not None and payload is not None:
+            self._clip.handle_remote_payload(bytes(payload))
 
     def _heartbeat_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         interval = self.config.net.heartbeat_interval_s
