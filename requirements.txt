@@ -1,6 +1,8 @@
 mss>=9.0.1,<10
 Pillow>=9.5.0,<11
 pynput>=1.7.6
+pyte>=0.8.1,<0.9
+pywinpty>=2.0.10; sys_platform == "win32"
 # Ubuntu 18.04 / Python <3.11: PySide2 (Qt5, glibc 2.27 OK)
 PySide2==5.15.2.1; python_version < "3.11"
 # Modern Python: PySide6 fallback (same code via qt_bind.py)

@@ -346,10 +346,11 @@ class QuickConnectDialog(QDialog):
         _make_frameless(self)
         self.setWindowTitle(i18n.t("quick_connect"))
         self.setMinimumWidth(420)
-        self.setMaximumWidth(520)
+        self.setMaximumWidth(560)
         self.host = ""
         self.password = ""
         self.save = False
+        self.mode = "desktop"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -419,12 +420,19 @@ class QuickConnectDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         foot.addWidget(btn_cancel)
 
+        btn_term = QPushButton(i18n.t("connect_terminal"))
+        btn_term.setObjectName("confirmCancel")
+        btn_term.setCursor(PointingHandCursor)
+        btn_term.setFocusPolicy(NoFocus)
+        btn_term.clicked.connect(lambda: self._ok("terminal"))
+        foot.addWidget(btn_term)
+
         btn_ok = QPushButton(i18n.t("remote_control"))
         btn_ok.setObjectName("confirmOk")
         btn_ok.setProperty("danger", "false")
         btn_ok.setCursor(PointingHandCursor)
         btn_ok.setFocusPolicy(NoFocus)
-        btn_ok.clicked.connect(self._ok)
+        btn_ok.clicked.connect(lambda: self._ok("desktop"))
         btn_ok.setDefault(True)
         foot.addWidget(btn_ok)
         root.addWidget(footer)
@@ -432,7 +440,7 @@ class QuickConnectDialog(QDialog):
         _polish(btn_ok)
         self.edit_host.setFocus()
 
-    def _ok(self) -> None:
+    def _ok(self, mode: str = "desktop") -> None:
         host = self.edit_host.text().strip()
         if not host:
             show_warning(self, title=i18n.t("tip"), message=i18n.t("fill_host"))
@@ -440,17 +448,18 @@ class QuickConnectDialog(QDialog):
         self.host = host
         self.password = self.edit_password.text()
         self.save = bool(self.chk_save.isChecked())
+        self.mode = mode
         self.accept()
 
 
 def ask_quick_connect(
     parent: Optional[QWidget],
-) -> Optional[Tuple[str, str, bool]]:
-    """Return (host, password, save) or None if cancelled."""
+) -> Optional[Tuple[str, str, bool, str]]:
+    """Return (host, password, save, mode) or None if cancelled. mode: desktop|terminal."""
     dialog = QuickConnectDialog(parent)
     if not qt_enum_eq(dialog_exec(dialog), DialogAccepted):
         return None
-    return dialog.host, dialog.password, dialog.save
+    return dialog.host, dialog.password, dialog.save, dialog.mode
 
 
 # Public aliases for other form dialogs (settings / device editor).

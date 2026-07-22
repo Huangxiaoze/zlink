@@ -12,6 +12,7 @@ try:
         QColor,
         QFont,
         QFontDatabase,
+        QFontMetrics,
         QGuiApplication,
         QIcon,
         QImage,
@@ -65,6 +66,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QColor,
         QFont,
         QFontDatabase,
+        QFontMetrics,
         QGuiApplication,
         QIcon,
         QImage,
@@ -198,6 +200,10 @@ AlignLeft = _enum(
 AlignRight = _enum(
     getattr(Qt, "AlignRight", None),
     getattr(getattr(Qt, "AlignmentFlag", None), "AlignRight", None),
+)
+AlignTop = _enum(
+    getattr(Qt, "AlignTop", None),
+    getattr(getattr(Qt, "AlignmentFlag", None), "AlignTop", None),
 )
 AlignVCenter = _enum(
     getattr(Qt, "AlignVCenter", None),
@@ -346,6 +352,50 @@ Key_F11 = _enum(
 Key_Escape = _enum(
     getattr(Qt, "Key_Escape", None),
     getattr(getattr(Qt, "Key", None), "Key_Escape", None),
+)
+Key_Return = _enum(
+    getattr(Qt, "Key_Return", None),
+    getattr(getattr(Qt, "Key", None), "Key_Return", None),
+)
+Key_Enter = _enum(
+    getattr(Qt, "Key_Enter", None),
+    getattr(getattr(Qt, "Key", None), "Key_Enter", None),
+)
+Key_Backspace = _enum(
+    getattr(Qt, "Key_Backspace", None),
+    getattr(getattr(Qt, "Key", None), "Key_Backspace", None),
+)
+Key_Tab = _enum(
+    getattr(Qt, "Key_Tab", None),
+    getattr(getattr(Qt, "Key", None), "Key_Tab", None),
+)
+Key_Delete = _enum(
+    getattr(Qt, "Key_Delete", None),
+    getattr(getattr(Qt, "Key", None), "Key_Delete", None),
+)
+Key_Up = _enum(
+    getattr(Qt, "Key_Up", None),
+    getattr(getattr(Qt, "Key", None), "Key_Up", None),
+)
+Key_Down = _enum(
+    getattr(Qt, "Key_Down", None),
+    getattr(getattr(Qt, "Key", None), "Key_Down", None),
+)
+Key_Left = _enum(
+    getattr(Qt, "Key_Left", None),
+    getattr(getattr(Qt, "Key", None), "Key_Left", None),
+)
+Key_Right = _enum(
+    getattr(Qt, "Key_Right", None),
+    getattr(getattr(Qt, "Key", None), "Key_Right", None),
+)
+Key_Home = _enum(
+    getattr(Qt, "Key_Home", None),
+    getattr(getattr(Qt, "Key", None), "Key_Home", None),
+)
+Key_End = _enum(
+    getattr(Qt, "Key_End", None),
+    getattr(getattr(Qt, "Key", None), "Key_End", None),
 )
 
 KEY_MAP_SRC = [

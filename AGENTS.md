@@ -136,6 +136,8 @@ remote/
     clipboard_sync.py       # 文字/文件剪贴板同步（Ctrl+Alt+C 推送 / Ctrl+Alt+V 拉取）
     file_transfer.py        # 专用远程文件传输（MsgType.FILE，落盘 Downloads/ZLink）
     remote_files.py         # 控制端远程文件浏览器（list/download）
+    terminal_pty.py         # 被控端 PTY / 终端桥
+    terminal_view.py        # 控制端远程终端窗口（pyte）
   scripts/build.py          # PyInstaller 跨平台打包入口
   scripts/build_windows.ps1
   scripts/build_linux.sh
@@ -161,8 +163,8 @@ magic = b"RD01"
 
 | Type | 方向 | Payload |
 |------|------|---------|
-| HELLO | C→H | JSON：`{role, version, password?}` |
-| HELLO_ACK | H→C | JSON：`{ok, reason?, screen_w, screen_h, features?}` |
+| HELLO | C→H | JSON：`{role, version, password?}`；`role=client` 远程桌面，`role=terminal` 直连终端，`role=probe` 探测 |
+| HELLO_ACK | H→C | JSON：`{ok, reason?, mode?, screen_w?, screen_h?, features?}` |
 | FRAME | H→C | JSON meta（utf-8）+ `\n\n` + JPEG bytes |
 | MOUSE | C→H | JSON：归一化坐标 + 按键/滚轮 |
 | KEY | C→H | JSON：key / action / modifiers |
@@ -171,6 +173,7 @@ magic = b"RD01"
 | BYE | 双向 | JSON：`{reason}` |
 | CLIPBOARD | 双向 | JSON meta + `\n\n` + blob（文字 UTF-8 或文件分片） |
 | FILE | 双向 | JSON meta + `\n\n` + blob（专用文件传输分片） |
+| TERM | 双向 | JSON meta + `\n\n` + blob（远程 PTY：open/data/resize/close） |
 
 CLIPBOARD meta：
 
@@ -184,8 +187,17 @@ FILE meta（与剪贴板文件通道独立，不经系统剪贴板）：
 - 远程下载：控制端 `{"op":"download","path"}` → 被控端回传 `chunk` 分片（或 `download_err`）
 - 能力协商：HELLO_ACK `features` 含 `"file_transfer"`
 
+TERM meta：
+
+- 打开：控制端 `{"op":"open","cols","rows"}` → 被控端 `open_ok` / `open_err`
+- 数据：双向 `{"op":"data"}` + blob（stdin/stdout 字节流）
+- 调整大小：控制端 `{"op":"resize","cols","rows"}`
+- 关闭：控制端 `{"op":"close"}` / 被控端 `{"op":"closed"}`
+- 能力协商：HELLO_ACK `features` 含 `"terminal"`
+- `role=terminal`：独立会话（不占桌面锁、不推送画面），控制端主界面可直接连接
+
 坐标使用 **相对屏幕归一化** `[0.0, 1.0]`，避免双方分辨率不一致。  
-`PROTOCOL_VERSION = 2`（剪贴板 + 文件传输能力通过 `features` 协商）。
+`PROTOCOL_VERSION = 2`（剪贴板 / 文件传输 / 终端能力通过 `features` 协商）。
 
 ### 4.3 扩展规则
 

@@ -2,4 +2,5 @@
 mss==9.0.1
 Pillow==9.5.0
 pynput==1.7.7
+pyte==0.8.2
 PySide2==5.15.2.1

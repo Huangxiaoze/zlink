@@ -201,7 +201,8 @@ def serve_forever(
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((bind_host, port))
-        server.listen(1)
+        # Allow probe / terminal / desktop connections to queue while a session runs.
+        server.listen(8)
         server.settimeout(1.0)
         log.info("listening on %s:%s", bind_host, port)
         while not should_stop():
@@ -215,10 +216,20 @@ def serve_forever(
                 raise
             configure_socket(client_sock, recv_buffer=recv_buffer)
             conn = Connection(client_sock)
-            try:
-                handler(conn, addr)
-            finally:
-                conn.close()
+
+            def _run(c: Connection = conn, a: tuple = addr) -> None:
+                try:
+                    handler(c, a)
+                except Exception:
+                    log.exception("client handler crashed %s", a)
+                finally:
+                    c.close()
+
+            threading.Thread(
+                target=_run,
+                name="host-client-%s-%s" % (addr[0], addr[1]),
+                daemon=True,
+            ).start()
 
 
 def connect_to(host: str, port: int, timeout_s: float, recv_buffer: int = 2 * 1024 * 1024) -> Connection:

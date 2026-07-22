@@ -13,6 +13,7 @@ from .devices import detect_os_label
 from .input_io import InputInjector
 from .net import Connection, password_matches, serve_forever
 from .protocol import MsgType, ProtocolError, decode_json, pack_frame_message
+from .terminal_pty import FEATURE_TERMINAL, HostTerminalBridge
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ class RemoteHost:
         # Dedicated file transfer queues (do not block recv on apply).
         self.file_out: queue.Queue = queue.Queue(maxsize=256)
         self.file_in: queue.Queue = queue.Queue(maxsize=256)
+        # Remote terminal (PTY) packets — flushed on the send thread.
+        self.term_out: queue.Queue = queue.Queue(maxsize=256)
+        self._term: Optional[HostTerminalBridge] = None
         # GUI sets this after applying a clipboard packet on the Qt thread.
         self.clipboard_applied = threading.Event()
         # Optional wakeup for GUI (e.g. Qt Signal.emit) — called from recv thread.
@@ -68,12 +72,21 @@ class RemoteHost:
             self.stop()
 
     def _clear_session_queues(self) -> None:
-        for q in (self.clipboard_out, self.clipboard_in, self.file_out, self.file_in):
+        for q in (
+            self.clipboard_out,
+            self.clipboard_in,
+            self.file_out,
+            self.file_in,
+            self.term_out,
+        ):
             while True:
                 try:
                     q.get_nowait()
                 except queue.Empty:
                     break
+
+    def _enqueue_term(self, packet: bytes) -> None:
+        self.term_out.put(packet, timeout=30.0)
 
     def _hello_ack(self, conn: Connection, payload: dict[str, Any]) -> None:
         data = dict(payload)
@@ -81,24 +94,132 @@ class RemoteHost:
         conn.send_json(MsgType.HELLO_ACK, data)
 
     def _handle_client(self, conn: Connection, addr: tuple) -> None:
+        try:
+            hello = self._recv_hello(conn)
+        except (ConnectionError, OSError, ProtocolError) as exc:
+            log.warning("hello failed %s: %s", addr, exc)
+            conn.close()
+            return
+        if hello is None:
+            conn.close()
+            return
+
+        role = str(hello.get("role") or "client")
+        if role == "terminal":
+            self._handle_terminal_client(conn, addr)
+            return
+
+        # Desktop session remains exclusive.
         if not self._session_lock.acquire(blocking=False):
-            log.warning("reject %s: session busy", addr)
+            log.warning("reject %s: desktop session busy", addr)
             try:
                 self._hello_ack(conn, {"ok": False, "reason": "busy"})
             except OSError:
                 pass
+            conn.close()
             return
 
-        log.info("client connected %s", addr)
+        self._handle_desktop_client(conn, addr, hello)
+
+    def _recv_hello(self, conn: Connection) -> Optional[dict[str, Any]]:
+        frame = conn.recv_frame()
+        if frame.type != MsgType.HELLO:
+            self._hello_ack(conn, {"ok": False, "reason": "expected_hello"})
+            return None
+        hello = decode_json(frame.payload)
+        client_ver = int(hello.get("version", -1))
+        if client_ver != PROTOCOL_VERSION:
+            self._hello_ack(conn, {"ok": False, "reason": "version_mismatch"})
+            return None
+        role = str(hello.get("role") or "client")
+        # Probes use role=probe and intentionally send an empty password; still
+        # advertise OS so the device list can show Windows / macOS / Ubuntu.
+        if role == "probe":
+            self._hello_ack(conn, {"ok": False, "reason": "probe"})
+            return None
+        if not password_matches(self.config.net.password, str(hello.get("password", ""))):
+            self._hello_ack(conn, {"ok": False, "reason": "auth_failed"})
+            log.warning("auth failed")
+            return None
+        return hello
+
+    def _handle_terminal_client(self, conn: Connection, addr: tuple) -> None:
+        """SSH-like terminal session: independent of desktop lock / screen capture."""
+        log.info("terminal client connected %s", addr)
+        session_stop = threading.Event()
+        term_out: queue.Queue = queue.Queue(maxsize=256)
+        term = HostTerminalBridge(lambda packet: term_out.put(packet, timeout=30.0))
+        sender: threading.Thread | None = None
+        watchdog: threading.Thread | None = None
+        try:
+            self._hello_ack(
+                conn,
+                {
+                    "ok": True,
+                    "mode": "terminal",
+                    "version": PROTOCOL_VERSION,
+                    "features": [FEATURE_TERMINAL],
+                },
+            )
+            sender = threading.Thread(
+                target=self._term_send_loop,
+                args=(conn, session_stop, term_out),
+                name="host-term-send",
+                daemon=True,
+            )
+            watchdog = threading.Thread(
+                target=self._watchdog_loop,
+                args=(conn, session_stop),
+                name="host-term-watchdog",
+                daemon=True,
+            )
+            sender.start()
+            watchdog.start()
+            self._term_recv_loop(conn, session_stop, term)
+        except (ConnectionError, OSError, ProtocolError) as exc:
+            log.warning("terminal session ended (%s): %s", addr, exc)
+        except Exception:
+            log.exception("terminal session crashed %s", addr)
+        finally:
+            session_stop.set()
+            term.close(send_closed=False)
+            try:
+                conn.send_json(MsgType.BYE, {"reason": "host_close"})
+            except Exception:
+                pass
+            conn.close()
+            if sender:
+                sender.join(timeout=2.0)
+            if watchdog:
+                watchdog.join(timeout=2.0)
+            log.info("terminal client disconnected %s", addr)
+
+    def _handle_desktop_client(
+        self, conn: Connection, addr: tuple, hello: dict[str, Any]
+    ) -> None:
+        log.info("desktop client connected %s", addr)
         sender: threading.Thread | None = None
         watchdog: threading.Thread | None = None
         session_stop = threading.Event()
-        injector: InputInjector | None = None
         self._clear_session_queues()
+        self._term = HostTerminalBridge(self._enqueue_term)
 
         try:
-            if not self._handshake(conn):
-                return
+            q = hello.get("quality")
+            if isinstance(q, dict):
+                self._apply_quality(q)
+
+            self._hello_ack(
+                conn,
+                {
+                    "ok": True,
+                    "mode": "desktop",
+                    "screen_w": self._capturer.src_width,
+                    "screen_h": self._capturer.src_height,
+                    "version": PROTOCOL_VERSION,
+                    "features": ["clipboard", "file_transfer", FEATURE_TERMINAL],
+                },
+            )
 
             self.session_live.set()
             injector = InputInjector(self._capturer.src_width, self._capturer.src_height)
@@ -124,6 +245,9 @@ class RemoteHost:
         finally:
             session_stop.set()
             self.session_live.clear()
+            if self._term is not None:
+                self._term.close(send_closed=False)
+                self._term = None
             self._clear_session_queues()
             try:
                 conn.send_json(MsgType.BYE, {"reason": "host_close"})
@@ -135,43 +259,7 @@ class RemoteHost:
             if watchdog:
                 watchdog.join(timeout=2.0)
             self._session_lock.release()
-            log.info("client disconnected %s", addr)
-
-    def _handshake(self, conn: Connection) -> bool:
-        frame = conn.recv_frame()
-        if frame.type != MsgType.HELLO:
-            self._hello_ack(conn, {"ok": False, "reason": "expected_hello"})
-            return False
-        hello = decode_json(frame.payload)
-        client_ver = int(hello.get("version", -1))
-        if client_ver != PROTOCOL_VERSION:
-            self._hello_ack(conn, {"ok": False, "reason": "version_mismatch"})
-            return False
-        # Probes use role=probe and intentionally send an empty password; still
-        # advertise OS so the device list can show Windows / macOS / Ubuntu.
-        if str(hello.get("role") or "") == "probe":
-            self._hello_ack(conn, {"ok": False, "reason": "probe"})
-            return False
-        if not password_matches(self.config.net.password, str(hello.get("password", ""))):
-            self._hello_ack(conn, {"ok": False, "reason": "auth_failed"})
-            log.warning("auth failed")
-            return False
-
-        q = hello.get("quality")
-        if isinstance(q, dict):
-            self._apply_quality(q)
-
-        self._hello_ack(
-            conn,
-            {
-                "ok": True,
-                "screen_w": self._capturer.src_width,
-                "screen_h": self._capturer.src_height,
-                "version": PROTOCOL_VERSION,
-                "features": ["clipboard", "file_transfer"],
-            },
-        )
-        return True
+            log.info("desktop client disconnected %s", addr)
 
     def _apply_quality(self, data: dict[str, Any]) -> None:
         stream = StreamConfig(
@@ -210,6 +298,51 @@ class RemoteHost:
                 return False
         return True
 
+    def _term_send_loop(
+        self,
+        conn: Connection,
+        session_stop: threading.Event,
+        term_out: queue.Queue,
+    ) -> None:
+        """Terminal-only session: TERM packets + heartbeat (no desktop frames)."""
+        while not session_stop.is_set() and not self._stop.is_set():
+            if not self._flush_reliable_out(conn, session_stop, term_out):
+                session_stop.set()
+                break
+            now = time.monotonic()
+            if (now - conn.last_tx) >= self.config.net.heartbeat_interval_s:
+                try:
+                    conn.send_heartbeat()
+                except (ConnectionError, OSError):
+                    session_stop.set()
+                    break
+            session_stop.wait(0.01)
+
+    def _term_recv_loop(
+        self,
+        conn: Connection,
+        session_stop: threading.Event,
+        term: HostTerminalBridge,
+    ) -> None:
+        while not session_stop.is_set() and not self._stop.is_set():
+            try:
+                frame = conn.recv_frame(stop_event=session_stop)
+            except ConnectionError:
+                session_stop.set()
+                break
+            if frame.type == MsgType.TERM:
+                try:
+                    term.handle_payload(frame.payload)
+                except Exception:
+                    log.exception("terminal handle failed")
+            elif frame.type == MsgType.HEARTBEAT:
+                continue
+            elif frame.type == MsgType.BYE:
+                session_stop.set()
+                break
+            else:
+                log.debug("ignore msg %s in terminal session", frame.type)
+
     def _send_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         pending_bytes = 0
         last_adapt = time.monotonic()
@@ -219,6 +352,9 @@ class RemoteHost:
                 session_stop.set()
                 break
             if not self._flush_reliable_out(conn, session_stop, self.file_out):
+                session_stop.set()
+                break
+            if not self._flush_reliable_out(conn, session_stop, self.term_out):
                 session_stop.set()
                 break
 
@@ -346,6 +482,13 @@ class RemoteHost:
                         notify()
                     except Exception:
                         log.exception("file_notify failed")
+            elif frame.type == MsgType.TERM:
+                term = self._term
+                if term is not None:
+                    try:
+                        term.handle_payload(frame.payload)
+                    except Exception:
+                        log.exception("terminal handle failed")
             elif frame.type == MsgType.HEARTBEAT:
                 continue
             elif frame.type == MsgType.BYE:

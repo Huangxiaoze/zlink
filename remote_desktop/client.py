@@ -18,6 +18,8 @@ from .file_transfer import (
     send_file,
 )
 from .remote_files import RemoteFileBrowser
+from .terminal_pty import FEATURE_TERMINAL
+from .terminal_view import RemoteTerminalWindow
 from .themes import CURRENT
 from .window_chrome import apply_window_chrome, ensure_windows_app_id
 from .i18n import i18n
@@ -91,6 +93,7 @@ class FrameBus(QObject):
     file_progress = Signal(str)
     file_list_result = Signal(object)  # meta dict
     file_download_error = Signal(object)  # meta dict
+    term_payload = Signal(object)
 
 
 class RemoteCanvas(QWidget):
@@ -253,6 +256,7 @@ class ViewerChromeBar(QFrame):
         on_toggle: Callable[[], None],
         on_send_file: Callable[[], None],
         on_browse_files: Callable[[], None],
+        on_terminal: Callable[[], None],
         on_hover: Callable[[bool], None],
     ) -> None:
         super().__init__(parent)
@@ -277,6 +281,13 @@ class ViewerChromeBar(QFrame):
         self.btn_browse.setFocusPolicy(NoFocus)
         self.btn_browse.clicked.connect(on_browse_files)
         lay.addWidget(self.btn_browse)
+
+        self.btn_term = QPushButton(i18n.t("viewer_terminal"))
+        self.btn_term.setObjectName("viewerChromeBtn")
+        self.btn_term.setCursor(PointingHandCursor)
+        self.btn_term.setFocusPolicy(NoFocus)
+        self.btn_term.clicked.connect(on_terminal)
+        lay.addWidget(self.btn_term)
         lay.addStretch(1)
 
         # Keep fullscreen near the window caption buttons (minimize/close).
@@ -320,6 +331,7 @@ class RemoteClientWindow(QMainWindow):
         self._file_sending = False
         self._file_send_stop = threading.Event()
         self._file_browser: Optional[RemoteFileBrowser] = None
+        self._terminal: Optional[RemoteTerminalWindow] = None
         # Set by main window when quitting the whole app (skip confirm once).
         self.force_close = False
 
@@ -347,6 +359,7 @@ class RemoteClientWindow(QMainWindow):
             on_toggle=self._toggle_fullscreen,
             on_send_file=self._pick_and_send_file,
             on_browse_files=self._open_remote_files,
+            on_terminal=self._open_terminal,
             on_hover=self._on_chrome_hover,
         )
         self._chrome_hide_timer = QTimer(self)
@@ -365,6 +378,7 @@ class RemoteClientWindow(QMainWindow):
         self._bus.file_progress.connect(self._on_status)
         self._bus.file_list_result.connect(self._on_file_list_result)
         self._bus.file_download_error.connect(self._on_file_download_error)
+        self._bus.term_payload.connect(self._on_term_payload)
 
         self._present_timer = QTimer(self)
         self._present_timer.setInterval(16)
@@ -442,9 +456,11 @@ class RemoteClientWindow(QMainWindow):
             self.chrome_bar.btn_action.setText(i18n.t("viewer_fullscreen"))
         self.chrome_bar.btn_send.setText(i18n.t("viewer_send_file"))
         self.chrome_bar.btn_browse.setText(i18n.t("viewer_browse_files"))
+        self.chrome_bar.btn_term.setText(i18n.t("viewer_terminal"))
         can_files = FEATURE_FILE_TRANSFER in self._features and not self._file_sending
         self.chrome_bar.btn_send.setEnabled(can_files)
         self.chrome_bar.btn_browse.setEnabled(can_files)
+        self.chrome_bar.btn_term.setEnabled(FEATURE_TERMINAL in self._features)
         w = max(1, self._central.width())
         self.chrome_bar.setGeometry(0, 0, w, 48)
         self.chrome_bar.raise_()
@@ -603,6 +619,8 @@ class RemoteClientWindow(QMainWindow):
                     self._bus.clipboard_payload.emit(fr.payload)
                 elif fr.type == MsgType.FILE:
                     self._bus.file_payload.emit(fr.payload)
+                elif fr.type == MsgType.TERM:
+                    self._bus.term_payload.emit(fr.payload)
                 elif fr.type == MsgType.HEARTBEAT:
                     continue
                 elif fr.type == MsgType.BYE:
@@ -661,6 +679,7 @@ class RemoteClientWindow(QMainWindow):
             except RuntimeError:
                 pass
             self._file_browser = None
+        self._close_terminal()
 
     def _on_file_payload(self, payload: object) -> None:
         if payload is None:
@@ -730,6 +749,47 @@ class RemoteClientWindow(QMainWindow):
 
         browser.finished.connect(_clear)
         browser.show()
+
+    def _open_terminal(self) -> None:
+        if FEATURE_TERMINAL not in self._features:
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("terminal_unsupported"))
+            return
+        if self._terminal is not None:
+            try:
+                self._terminal.raise_()
+                self._terminal.activateWindow()
+                return
+            except RuntimeError:
+                self._terminal = None
+
+        def send_packet(packet: bytes) -> None:
+            self._send_file_packet(packet)
+
+        win = RemoteTerminalWindow(self, send_packet=send_packet)
+        self._terminal = win
+
+        def _clear(_result: int = 0) -> None:
+            if self._terminal is win:
+                self._terminal = None
+
+        win.finished.connect(_clear)
+        win.show()
+
+    def _close_terminal(self) -> None:
+        if self._terminal is None:
+            return
+        try:
+            self._terminal.close()
+        except RuntimeError:
+            pass
+        self._terminal = None
+
+    def _on_term_payload(self, payload: object) -> None:
+        if self._terminal is not None and payload is not None:
+            try:
+                self._terminal.handle_term_payload(bytes(payload))
+            except Exception:
+                log.exception("terminal payload handle failed")
 
     def _send_file_packet(self, packet: bytes) -> None:
         conn = self._conn

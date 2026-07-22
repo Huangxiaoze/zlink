@@ -72,6 +72,7 @@ from .confirm_dialog import (
     show_info,
     show_warning,
 )
+from .terminal_view import DirectTerminalWindow
 from .window_chrome import apply_window_chrome, ensure_windows_app_id
 from .themes import (
     DEFAULT_THEME,
@@ -120,6 +121,7 @@ class DeviceCard(QFrame):
 
     selected = Signal(str)
     activated = Signal(str)
+    term_activated = Signal(str)
     context_menu = Signal(str, object)
     hover_changed = Signal(bool)
 
@@ -161,10 +163,17 @@ class DeviceCard(QFrame):
         self.lbl_notes.setWordWrap(True)
 
         bottom = QHBoxLayout()
+        bottom.setSpacing(8)
         bottom.addStretch(1)
+        self.btn_term = QPushButton()
+        self.btn_term.setCursor(PointingHandCursor)
+        self.btn_term.setFocusPolicy(NoFocus)
+        self.btn_term.clicked.connect(lambda: self.term_activated.emit(self.device_id))
+        bottom.addWidget(self.btn_term)
         self.btn_connect = QPushButton()
         self.btn_connect.setObjectName("primary")
         self.btn_connect.setCursor(PointingHandCursor)
+        self.btn_connect.setFocusPolicy(NoFocus)
         self.btn_connect.clicked.connect(lambda: self.activated.emit(self.device_id))
         bottom.addWidget(self.btn_connect)
 
@@ -209,6 +218,7 @@ class DeviceCard(QFrame):
         notes = (device.notes or "").strip()
         self.lbl_notes.setText(notes)
         self.lbl_notes.setVisible(bool(notes))
+        self.btn_term.setText(i18n.t("connect_terminal"))
         self.btn_connect.setText(i18n.t("remote_control"))
 
     def set_selected(self, selected: bool) -> None:
@@ -398,6 +408,7 @@ class MainWindow(QMainWindow):
         self._host_thread: threading.Thread | None = None
         self._probe_stop = threading.Event()
         self._viewers: list[RemoteClientWindow] = []
+        self._terminals: list[DirectTerminalWindow] = []
         self._host_clip: ClipboardBridge | None = None
         self._host_clip_timer: QTimer | None = None
         self._host_files: FileAssembler | None = None
@@ -790,6 +801,7 @@ class MainWindow(QMainWindow):
             card = DeviceCard(device, status_key, self.device_grid_host)
             card.selected.connect(self._on_card_selected)
             card.activated.connect(self._on_card_activated)
+            card.term_activated.connect(self._on_card_term_activated)
             card.context_menu.connect(self._on_card_context_menu)
             card.hover_changed.connect(self._on_card_hover_changed)
             card.set_selected(device.id == selected)
@@ -831,15 +843,31 @@ class MainWindow(QMainWindow):
             return
         self._launch_client(device.host, DEFAULT_PORT, device.password, device.name, device.id)
 
+    def _on_card_term_activated(self, device_id: str) -> None:
+        self._selected_device_id = device_id
+        device = self.store.get(device_id)
+        if device is None:
+            return
+        self._launch_terminal(device.host, DEFAULT_PORT, device.password, device.name, device.id)
+
     def _on_card_context_menu(self, device_id: str, global_pos) -> None:
         self._on_card_selected(device_id)
         menu = QMenu(self)
+        act_desktop = QAction(i18n.t("remote_control"), menu)
+        act_term = QAction(i18n.t("connect_terminal"), menu)
         act_edit = QAction(i18n.t("edit"), menu)
         act_delete = QAction(i18n.t("delete"), menu)
+        menu.addAction(act_desktop)
+        menu.addAction(act_term)
+        menu.addSeparator()
         menu.addAction(act_edit)
         menu.addAction(act_delete)
         chosen = menu_exec(menu, global_pos)
-        if chosen is act_edit:
+        if chosen is act_desktop:
+            self._on_card_activated(device_id)
+        elif chosen is act_term:
+            self._on_card_term_activated(device_id)
+        elif chosen is act_edit:
             self._edit_device(device_id)
         elif chosen is act_delete:
             self._delete_device(device_id)
@@ -905,6 +933,11 @@ class MainWindow(QMainWindow):
         for viewer in list(self._viewers):
             try:
                 apply_window_chrome(viewer, THEME)
+            except RuntimeError:
+                pass
+        for term in list(self._terminals):
+            try:
+                apply_window_chrome(term, THEME)
             except RuntimeError:
                 pass
         self._set_status(i18n.t("settings_saved"))
@@ -1192,14 +1225,17 @@ class MainWindow(QMainWindow):
         result = ask_quick_connect(self)
         if not result:
             return
-        host, password, save = result
+        host, password, save, mode = result
         device_id = None
         if save:
             device = Device.create(name=host, host=host, password=password)
             self.store.upsert(device)
             device_id = device.id
             self._reload_devices()
-        self._launch_client(host, DEFAULT_PORT, password, host, device_id)
+        if mode == "terminal":
+            self._launch_terminal(host, DEFAULT_PORT, password, host, device_id)
+        else:
+            self._launch_client(host, DEFAULT_PORT, password, host, device_id)
 
     def _find_viewer(
         self,
@@ -1282,6 +1318,77 @@ class MainWindow(QMainWindow):
             self.store.touch_connected(device_id)
             self._reload_devices()
         self._set_status(i18n.t("connecting", title=title, host=host, port=port))
+
+    def _find_terminal(
+        self,
+        host: str,
+        port: int,
+        device_id: str | None,
+    ) -> DirectTerminalWindow | None:
+        host_key = host.strip().lower()
+        port_key = int(port)
+        for win in list(self._terminals):
+            try:
+                win_host = str(win.net.host).strip().lower()
+                win_port = int(win.net.port)
+                win_id = getattr(win, "device_id", None)
+            except RuntimeError:
+                if win in self._terminals:
+                    self._terminals.remove(win)
+                continue
+            if device_id and win_id and win_id == device_id:
+                return win
+            if win_host == host_key and win_port == port_key:
+                return win
+        return None
+
+    def _focus_terminal(self, win: DirectTerminalWindow, title: str) -> None:
+        try:
+            if win.isMinimized():
+                win.showNormal()
+            win.show()
+            win.raise_()
+            win.activateWindow()
+            app = QApplication.instance()
+            if app is not None:
+                app.setActiveWindow(win)
+        except RuntimeError:
+            return
+        self._set_status(i18n.t("terminal_focus_existing", title=title))
+
+    def _launch_terminal(
+        self,
+        host: str,
+        port: int,
+        password: str,
+        title: str,
+        device_id: str | None,
+    ) -> None:
+        existing = self._find_terminal(host, port, device_id)
+        if existing is not None:
+            self._focus_terminal(existing, title)
+            if device_id:
+                self.store.touch_connected(device_id)
+                self._reload_devices()
+            return
+
+        net = NetConfig(host=host, port=port, password=password)
+        win = DirectTerminalWindow(net=net, title=title, parent=None, reconnect=True)
+        win.device_id = device_id
+        win.setAttribute(WA_DeleteOnClose, True)
+        self._terminals.append(win)
+
+        def _drop(*_: object, window: DirectTerminalWindow = win) -> None:
+            if window in self._terminals:
+                self._terminals.remove(window)
+
+        win.destroyed.connect(_drop)
+        win.show()
+        win.start()
+        if device_id:
+            self.store.touch_connected(device_id)
+            self._reload_devices()
+        self._set_status(i18n.t("terminal_connecting_host", title=title, host=host, port=port))
 
     def _probe_now(self) -> None:
         threading.Thread(target=self._probe_devices, name="probe-now", daemon=True).start()

@@ -106,6 +106,8 @@ def _hidden_imports() -> list[str]:
         "remote_desktop.toggle_switch",
         "remote_desktop.file_transfer",
         "remote_desktop.remote_files",
+        "remote_desktop.terminal_pty",
+        "remote_desktop.terminal_view",
         "remote_desktop.qt_bind",
         "remote_desktop.qt_fonts",
         "remote_desktop.i18n",
@@ -118,10 +120,11 @@ def _hidden_imports() -> list[str]:
         "mss",
         "PIL",
         "pynput",
+        "pyte",
     ]
     system = platform.system().lower()
     if system == "windows":
-        mods.extend(["pynput.keyboard._win32", "pynput.mouse._win32"])
+        mods.extend(["pynput.keyboard._win32", "pynput.mouse._win32", "winpty"])
     elif system == "darwin":
         mods.extend(["pynput.keyboard._darwin", "pynput.mouse._darwin"])
     else:
