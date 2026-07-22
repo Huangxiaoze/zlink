@@ -24,7 +24,7 @@ def app_data_dir() -> Path:
     return path
 
 
-@dataclass(slots=True)
+@dataclass
 class Device:
     id: str
     name: str
@@ -53,7 +53,7 @@ class Device:
         )
 
 
-@dataclass(slots=True)
+@dataclass
 class AppSettings:
     host_bind: str = "0.0.0.0"
     host_port: int = 5959

@@ -27,7 +27,7 @@ class ProtocolError(ValueError):
     """Invalid or oversized protocol frame."""
 
 
-@dataclass(slots=True)
+@dataclass
 class Frame:
     type: MsgType
     payload: bytes

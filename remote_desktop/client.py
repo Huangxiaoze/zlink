@@ -2,23 +2,51 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable
-
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QImage, QKeyEvent, QKeySequence, QMouseEvent, QPainter, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout, QWidget
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from . import PROTOCOL_VERSION
 from .config import ClientConfig
 from .i18n import i18n
 from .net import Connection, connect_to
 from .protocol import MsgType, ProtocolError, decode_json, unpack_frame_message
+from .qt_bind import (
+    Format_RGB32,
+    KeepAspectRatio,
+    MiddleButton,
+    MouseFocusReason,
+    QApplication,
+    QImage,
+    QKeyEvent,
+    QKeySequence,
+    QLabel,
+    QMainWindow,
+    QMouseEvent,
+    QObject,
+    QPainter,
+    QPixmap,
+    QTimer,
+    QVBoxLayout,
+    QWheelEvent,
+    QWidget,
+    RightButton,
+    Signal,
+    SmoothPixmapTransform,
+    SmoothTransformation,
+    StrongFocus,
+    WA_NoSystemBackground,
+    WA_OpaquePaintEvent,
+    WA_TransparentForMouseEvents,
+    black,
+    event_pos,
+    qt_key_constants,
+)
 
 log = logging.getLogger(__name__)
+_KEY_CONSTANTS = qt_key_constants()
 
 
 class FrameBus(QObject):
-    frame_jpeg = Signal(bytes, dict)
+    frame_jpeg = Signal(object, object)  # bytes, dict — object for PySide2 safety
     status = Signal(str)
     session_ended = Signal(str)
 
@@ -32,13 +60,13 @@ class RemoteCanvas(QWidget):
         self._scaled = QPixmap()
         self._scaled_for = (0, 0)
         self._blit_rect = (0, 0, 0, 0)
-        self.on_mouse: Callable[[str, float, float, dict[str, Any]], None] | None = None
-        self.on_key: Callable[[str, str], None] | None = None
-        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.on_mouse: Optional[Callable[[str, float, float, Dict[str, Any]], None]] = None
+        self.on_key: Optional[Callable[[str, str], None]] = None
+        self.setAttribute(WA_OpaquePaintEvent, True)
+        self.setAttribute(WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(StrongFocus)
         self.setMinimumSize(320, 240)
 
     def set_image(self, image: QImage) -> None:
@@ -51,29 +79,24 @@ class RemoteCanvas(QWidget):
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.setRenderHint(SmoothPixmapTransform, True)
         w, h = self.width(), self.height()
         if self._source.isNull():
-            painter.fillRect(self.rect(), Qt.GlobalColor.black)
+            painter.fillRect(self.rect(), black)
             return
 
         if self._scaled.isNull() or self._scaled_for != (w, h):
-            self._scaled = self._source.scaled(
-                w,
-                h,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+            self._scaled = self._source.scaled(w, h, KeepAspectRatio, SmoothTransformation)
             self._scaled_for = (w, h)
 
         sw, sh = self._scaled.width(), self._scaled.height()
         x = (w - sw) // 2
         y = (h - sh) // 2
         self._blit_rect = (x, y, sw, sh)
-        painter.fillRect(self.rect(), Qt.GlobalColor.black)
+        painter.fillRect(self.rect(), black)
         painter.drawPixmap(x, y, self._scaled)
 
-    def _norm(self, px: float, py: float) -> tuple[float, float] | None:
+    def _norm(self, px: float, py: float) -> Optional[Tuple[float, float]]:
         x, y, w, h = self._blit_rect
         if w <= 0 or h <= 0:
             return None
@@ -87,7 +110,7 @@ class RemoteCanvas(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._emit_mouse("down", event, button=_qt_button(event.button()))
-        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        self.setFocus(MouseFocusReason)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -95,12 +118,18 @@ class RemoteCanvas(QWidget):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
-        pos = event.position()
-        norm = self._norm(pos.x(), pos.y())
+        px, py = event_pos(event)
+        norm = self._norm(px, py)
         if norm and self.on_mouse:
-            delta = event.angleDelta()
-            dy = 1 if delta.y() > 0 else -1 if delta.y() < 0 else 0
-            dx = 1 if delta.x() > 0 else -1 if delta.x() < 0 else 0
+            if hasattr(event, "angleDelta"):
+                delta = event.angleDelta()
+                dy = 1 if delta.y() > 0 else -1 if delta.y() < 0 else 0
+                dx = 1 if delta.x() > 0 else -1 if delta.x() < 0 else 0
+            else:
+                # Very old Qt5 fallback
+                delta = int(getattr(event, "delta", lambda: 0)())
+                dy = 1 if delta > 0 else -1 if delta < 0 else 0
+                dx = 0
             self.on_mouse("scroll", norm[0], norm[1], {"dx": dx, "dy": dy})
         super().wheelEvent(event)
 
@@ -117,24 +146,25 @@ class RemoteCanvas(QWidget):
     def _emit_mouse(self, action: str, event: QMouseEvent, **extra: Any) -> None:
         if not self.on_mouse:
             return
-        pos = event.position()
-        norm = self._norm(pos.x(), pos.y())
+        px, py = event_pos(event)
+        norm = self._norm(px, py)
         if norm is None:
             return
         self.on_mouse(action, norm[0], norm[1], extra)
 
 
 class RemoteClientWindow(QMainWindow):
-    def __init__(self, config: ClientConfig, parent: QWidget | None = None) -> None:
+    def __init__(self, config: ClientConfig, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.config = config
         self._stop = threading.Event()
-        self._conn: Connection | None = None
+        self._conn: Optional[Connection] = None
         self._bus = FrameBus()
-        self._pending_jpeg: bytes | None = None
-        self._pending_meta: dict[str, Any] = {}
+        self._pending_jpeg: Optional[bytes] = None
+        self._pending_meta: Dict[str, Any] = {}
         self._lock = threading.Lock()
-        self._net_thread: threading.Thread | None = None
+        self._net_thread: Optional[threading.Thread] = None
+        self._hud_tick = 0
 
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
@@ -150,7 +180,7 @@ class RemoteClientWindow(QMainWindow):
         self.hud.setStyleSheet(
             "QLabel { color: #B8F0C8; background: rgba(0,0,0,120); padding: 4px 8px; }"
         )
-        self.hud.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.hud.setAttribute(WA_TransparentForMouseEvents, True)
         self.hud.move(8, 8)
         layout.addWidget(self.canvas, 1)
         self.setCentralWidget(central)
@@ -159,7 +189,6 @@ class RemoteClientWindow(QMainWindow):
         self._bus.status.connect(self._on_status)
         self._bus.session_ended.connect(self._on_status)
 
-        self._hud_tick = 0
         self._present_timer = QTimer(self)
         self._present_timer.setInterval(16)
         self._present_timer.timeout.connect(self._present_pending)
@@ -191,11 +220,10 @@ class RemoteClientWindow(QMainWindow):
         self.hud.adjustSize()
         self.hud.raise_()
 
-    def _on_frame_jpeg(self, jpeg: bytes, meta: dict) -> None:
+    def _on_frame_jpeg(self, jpeg: object, meta: object) -> None:
         with self._lock:
-            # Keep only the newest frame (drop stale) — smoothness over completeness.
-            self._pending_jpeg = jpeg
-            self._pending_meta = meta
+            self._pending_jpeg = bytes(jpeg) if jpeg is not None else None
+            self._pending_meta = dict(meta) if isinstance(meta, dict) else {}
 
     def _present_pending(self) -> None:
         with self._lock:
@@ -207,15 +235,14 @@ class RemoteClientWindow(QMainWindow):
         image = QImage.fromData(jpeg, "JPEG")
         if image.isNull():
             return
-        if image.format() != QImage.Format.Format_RGB32:
-            image = image.convertToFormat(QImage.Format.Format_RGB32)
+        if image.format() != Format_RGB32:
+            image = image.convertToFormat(Format_RGB32)
         self.canvas.set_image(image)
-        # HUD text updates are throttled to reduce layout churn / flicker.
         self._hud_tick = (self._hud_tick + 1) % 15
         if self._hud_tick == 0:
             self._on_status(
-                f"seq={meta.get('seq', '-')} q={meta.get('q', '-')} "
-                f"{meta.get('w', '-')}x{meta.get('h', '-')}"
+                "seq=%s q=%s %sx%s"
+                % (meta.get("seq", "-"), meta.get("q", "-"), meta.get("w", "-"), meta.get("h", "-"))
             )
 
     def _session_loop(self) -> None:
@@ -234,7 +261,7 @@ class RemoteClientWindow(QMainWindow):
 
             if self._stop.is_set() or not self.config.reconnect:
                 break
-            self._bus.status.emit(i18n.t("viewer_reconnecting", sec=f"{backoff:.0f}"))
+            self._bus.status.emit(i18n.t("viewer_reconnecting", sec="%.0f" % backoff))
             if self._stop.wait(backoff):
                 break
             backoff = min(self.config.reconnect_max_s, backoff * 1.7)
@@ -305,11 +332,12 @@ class RemoteClientWindow(QMainWindow):
                 break
             session_stop.wait(interval)
 
-    def _handle_mouse(self, action: str, x: float, y: float, extra: dict[str, Any]) -> None:
+    def _handle_mouse(self, action: str, x: float, y: float, extra: Dict[str, Any]) -> None:
         conn = self._conn
         if not conn:
             return
-        payload = {"action": action, "x": x, "y": y, **extra}
+        payload = {"action": action, "x": x, "y": y}
+        payload.update(extra)
         try:
             conn.send_json(MsgType.MOUSE, payload)
         except (ConnectionError, OSError):
@@ -325,52 +353,18 @@ class RemoteClientWindow(QMainWindow):
             self._stop.set()
 
 
-def _qt_button(button: Qt.MouseButton) -> str:
-    if button == Qt.MouseButton.RightButton:
+def _qt_button(button: Any) -> str:
+    if button == RightButton:
         return "right"
-    if button == Qt.MouseButton.MiddleButton:
+    if button == MiddleButton:
         return "middle"
     return "left"
 
 
 def _qt_key_name(event: QKeyEvent) -> str:
     key = event.key()
-    special = {
-        Qt.Key.Key_Return: "enter",
-        Qt.Key.Key_Enter: "enter",
-        Qt.Key.Key_Backspace: "backspace",
-        Qt.Key.Key_Tab: "tab",
-        Qt.Key.Key_Escape: "esc",
-        Qt.Key.Key_Space: "space",
-        Qt.Key.Key_Delete: "delete",
-        Qt.Key.Key_Insert: "insert",
-        Qt.Key.Key_Home: "home",
-        Qt.Key.Key_End: "end",
-        Qt.Key.Key_PageUp: "pageup",
-        Qt.Key.Key_PageDown: "pagedown",
-        Qt.Key.Key_Left: "left",
-        Qt.Key.Key_Right: "right",
-        Qt.Key.Key_Up: "up",
-        Qt.Key.Key_Down: "down",
-        Qt.Key.Key_Control: "ctrl",
-        Qt.Key.Key_Shift: "shift",
-        Qt.Key.Key_Alt: "alt",
-        Qt.Key.Key_Meta: "cmd",
-        Qt.Key.Key_F1: "f1",
-        Qt.Key.Key_F2: "f2",
-        Qt.Key.Key_F3: "f3",
-        Qt.Key.Key_F4: "f4",
-        Qt.Key.Key_F5: "f5",
-        Qt.Key.Key_F6: "f6",
-        Qt.Key.Key_F7: "f7",
-        Qt.Key.Key_F8: "f8",
-        Qt.Key.Key_F9: "f9",
-        Qt.Key.Key_F10: "f10",
-        Qt.Key.Key_F11: "f11",
-        Qt.Key.Key_F12: "f12",
-    }
-    if key in special:
-        return special[key]
+    if key in _KEY_CONSTANTS:
+        return _KEY_CONSTANTS[key]
     text = event.text()
     if text:
         return text
@@ -393,4 +387,6 @@ class RemoteClient:
         win = RemoteClientWindow(self.config)
         win.show()
         win.start()
-        app.exec()
+        # PySide2: exec_(); PySide6: exec()
+        fn = getattr(app, "exec_", None) or getattr(app, "exec")
+        fn()

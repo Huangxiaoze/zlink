@@ -4,11 +4,17 @@ import logging
 import os
 import sys
 
-from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication
+from .qt_bind import (
+    PreferDefaultHinting,
+    QFont,
+    QGuiApplication,
+    SansSerif,
+    font_db_families,
+    set_font_families,
+)
 
 log = logging.getLogger(__name__)
 
-# Ordered fallbacks for Chinese glyphs on Ubuntu/Windows/macOS.
 CJK_FAMILIES = [
     "Noto Sans CJK SC",
     "Noto Sans CJK JP",
@@ -27,9 +33,9 @@ CJK_FAMILIES = [
 
 
 def ensure_utf8_stdio() -> None:
-    # Helps CLI logs on some Linux locales; GUI text uses Qt fonts.
     os.environ.setdefault("PYTHONUTF8", "1")
     os.environ.setdefault("LANG", os.environ.get("LANG") or "C.UTF-8")
+    os.environ.setdefault("LC_ALL", os.environ.get("LC_ALL") or "C.UTF-8")
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
         reconfigure = getattr(stream, "reconfigure", None)
@@ -41,22 +47,29 @@ def ensure_utf8_stdio() -> None:
 
 
 def apply_app_font(app: QGuiApplication, point_size: int = 10) -> str:
-    """Pick a CJK-capable UI font and install family fallbacks."""
-    available = set(QFontDatabase.families())
+    available = set(font_db_families())
     chosen = next((name for name in CJK_FAMILIES if name in available), None)
-
     font = QFont()
-    # Qt will try families in order when glyphs are missing.
-    font.setFamilies(CJK_FAMILIES if chosen is None else [chosen, *CJK_FAMILIES])
+    families = [chosen, *CJK_FAMILIES] if chosen else list(CJK_FAMILIES)
+    # Drop Nones while preserving order.
+    ordered: list[str] = []
+    for name in families:
+        if name and name not in ordered:
+            ordered.append(name)
+    set_font_families(font, ordered)
     font.setPointSize(point_size)
-    font.setStyleHint(QFont.StyleHint.SansSerif)
-    font.setHintingPreference(QFont.HintingPreference.PreferDefaultHinting)
+    font.setStyleHint(SansSerif)
+    if PreferDefaultHinting is not None:
+        try:
+            font.setHintingPreference(PreferDefaultHinting)
+        except Exception:
+            pass
     app.setFont(font)
-
     if chosen:
         log.info("UI font: %s", chosen)
         return chosen
     log.warning(
-        "No preferred CJK font found. Install fonts-noto-cjk or fonts-wqy-microhei on Ubuntu."
+        "No preferred CJK font found. On Ubuntu 18.04 install: "
+        "sudo apt install fonts-noto-cjk  (or fonts-wqy-microhei)"
     )
     return font.family()

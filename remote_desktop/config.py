@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-@dataclass(slots=True)
+@dataclass
 class StreamConfig:
     max_fps: float = 30.0
     jpeg_quality: int = 60
@@ -20,7 +20,7 @@ class StreamConfig:
         return self
 
 
-@dataclass(slots=True)
+@dataclass
 class NetConfig:
     host: str = "0.0.0.0"
     port: int = 5959
@@ -33,14 +33,14 @@ class NetConfig:
     recv_buffer: int = 256 * 1024
 
 
-@dataclass(slots=True)
+@dataclass
 class HostConfig:
     net: NetConfig
     stream: StreamConfig
     bind_require_password: bool = True
 
 
-@dataclass(slots=True)
+@dataclass
 class ClientConfig:
     net: NetConfig
     stream: StreamConfig

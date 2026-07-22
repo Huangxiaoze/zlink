@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from PIL import Image
 
 
-@dataclass(slots=True)
+@dataclass
 class EncodedFrame:
     jpeg: bytes
     width: int
@@ -30,7 +30,9 @@ def encode_bgra(
     if scale < 0.999:
         dst_w = max(1, int(src_width * scale))
         dst_h = max(1, int(src_height * scale))
-        image = image.resize((dst_w, dst_h), Image.Resampling.BILINEAR)
+        # Pillow 9: Image.BILINEAR; Pillow 10+: Image.Resampling.BILINEAR
+        resample = getattr(getattr(Image, "Resampling", Image), "BILINEAR", Image.BILINEAR)
+        image = image.resize((dst_w, dst_h), resample)
     else:
         dst_w, dst_h = src_width, src_height
 

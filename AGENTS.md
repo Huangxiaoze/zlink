@@ -1,14 +1,17 @@
 # Remote Desktop — AGENTS.md
 
+> 分支：`compat/remote-ubuntu-18.04`  
+> 目标平台：**Ubuntu 18.04（glibc 2.27）+ Python 3.8 + PySide2/Qt5**
+
 本文档记录本项目的设计取舍、架构决策与编程规范，供后续开发与 AI Agent 协作时遵循。
 
 ## 1. 目标与边界
 
 ### 目标
 
-- 用 **Python 3.10+** 实现跨平台远程桌面（Linux / Windows / macOS）
+- 用 **Python 3.8+** 实现跨平台远程桌面；本分支优先保证 **Ubuntu 18.04** 可运行
 - 角色分离：**Host（被控端）** 抓屏并注入输入；**Client（主控端）** 显示画面并采集键鼠
-- 提供 **向日葵风格设备管理 GUI（PySide6/Qt）**：本机远控开关、设备列表 CRUD、在线探测、一键远程控制
+- 提供 **向日葵风格设备管理 GUI（Qt）**：本机远控开关、设备列表 CRUD、在线探测、一键远程控制
 - **中英文切换**；Ubuntu 下通过 CJK 字体回退解决中文乱码
 - 优先保证 **流畅性**（低延迟、可丢帧、远程画面防闪烁）与 **稳定性**（心跳、超时、优雅断开、客户端重连）
 - 直连 TCP 模式（Host 监听，Client 连接）；不实现向日葵式公网中继 / NAT 穿透（可后续扩展）
@@ -59,11 +62,17 @@ Client: input events → TCP send → Host inject
 | 截屏 | `mss` | Win/macOS/Linux(X11) 表现稳定 |
 | 图像 | `Pillow` | JPEG 编解码 |
 | 键鼠注入/采集 | `pynput` | 需系统辅助权限（见 README） |
-| 管理界面 / 远程画面 | `PySide6` | 统一 Qt 事件循环；远程窗口与管理窗口同进程 |
+| 管理界面 / 远程画面 | `PySide2`（优先）/ `PySide6`（回退） | 经 `qt_bind.py` 统一枚举与 API |
 | 中英文 | `i18n.py` | 运行时可切换，写入 `settings.language` |
-| CJK 字体 | `qt_fonts.py` | `QFont.setFamilies` 回退链，优先 Noto/文泉驿/雅黑 |
+| CJK 字体 | `qt_fonts.py` | 字体族回退链，优先 Noto/文泉驿/雅黑 |
 
-### 2.5 GUI 架构决策
+### 2.5 为何本分支不用 PySide6
+
+- Ubuntu 18.04 仅有 **glibc 2.27**
+- 官方 Qt6 / 新版 PySide6 轮子通常要求 **glibc ≥ 2.28**
+- 因此本分支：**PySide2 5.15 + Python 3.8**；`qt_bind.py` 在缺少 PySide2 时回退 PySide6，便于现代机器开发自测
+
+### 2.6 GUI 架构决策
 
 ```text
 QApplication
@@ -75,27 +84,24 @@ QApplication
        └─ QTimer(~16ms)：合并最新 JPEG 后上屏（防闪烁）
 ```
 
-- **同进程多窗口**：管理端与控制端都用 Qt，避免 tk/pygame 双事件循环
+- **所有 Qt import 必须走 `qt_bind.py`**，禁止业务代码直接 `from PySide6...` / `from PySide2...`
+- 对话框用 `dialog_exec()`（兼容 `exec_` / `exec`）
 - **防闪烁要点**（改动时勿破坏）：
   1. 网络线程只保留最新帧，旧帧丢弃
   2. GUI 用 `QTimer` 合帧，不要每包立刻 `repaint`
-  3. `RemoteCanvas` 使用 `WA_OpaquePaintEvent`，在同一次 `paintEvent` 内绘制，避免先清黑再异步贴图
-  4. 缩放结果按窗口尺寸缓存，窗口未变不重复 `scaled()`
-  5. 用 `QImage.fromData(..., "JPEG")`，不要 PIL→原始 buffer→pygame 这条易闪路径
-- **中文乱码**：不依赖系统默认 Latin 字体；启动时 `apply_app_font()`。Ubuntu 建议安装 `fonts-noto-cjk`
-- 设备与设置持久化到用户配置目录（含 `language`）：
-  - Windows: `%APPDATA%/remote_desktop/devices.json`
-  - macOS: `~/Library/Application Support/remote_desktop/devices.json`
-  - Linux: `~/.config/remote_desktop/devices.json`
-- “设备识别码”仅作本机展示/备注；真正连接仍使用 **IP + 端口 + 验证码**
-- 密码存本地 JSON（当前未加密）；日志禁止打印密码明文
+  3. `RemoteCanvas` 使用 `WA_OpaquePaintEvent`，在同一次 `paintEvent` 内绘制
+  4. 缩放结果按窗口尺寸缓存
+  5. 用 `QImage.fromData(..., "JPEG")`
+- **中文乱码**：启动时 `apply_app_font()`；Ubuntu 18.04 安装 `fonts-noto-cjk` 或 `fonts-wqy-microhei`
+- 设备与设置持久化到用户配置目录（含 `language`）
+- “设备识别码”仅本地展示；连接用 **IP + 端口 + 验证码**
 
 平台注意：
 
+- **Ubuntu 18.04**：Python 3.8（deadsnakes）、X11、见 `requirements-ubuntu1804.txt`
+- **Linux Wayland**：`mss`/`pynput` 可能受限，优先 X11
 - **macOS**：屏幕录制 + 辅助功能权限
-- **Linux Wayland**：`mss`/`pynput` 可能受限，优先 X11 或文档标明限制
-- **Ubuntu 中文**：`sudo apt install fonts-noto-cjk`（或 `fonts-wqy-microhei`）
-- **Windows**：部分全屏游戏/管理员窗口注入可能失败，属 OS 安全策略
+- **Windows**：部分提升权限窗口注入可能失败
 
 ## 3. 目录结构
 
@@ -118,9 +124,11 @@ remote/
     client.py               # 主控端
     devices.py              # 设备列表 / 本机设置持久化
     i18n.py                 # 中英文文案
+    qt_bind.py              # PySide2/PySide6 兼容层（本分支核心）
     qt_fonts.py             # CJK 字体选择
     app_gui.py              # Qt 设备管理界面
     client.py               # Qt 远程画面（防闪烁）
+  requirements-ubuntu1804.txt  # 18.04 钉扎依赖
 ```
 
 ## 4. 协议规范
@@ -161,8 +169,9 @@ magic = b"RD01"
 
 ### 5.1 语言与风格
 
-- Python 3.10+，使用 `from __future__ import annotations`
-- 公共 API 加类型标注；优先 `dataclass(slots=True)` 表达配置/消息
+- Python 3.8+，使用 `from __future__ import annotations`
+- 公共 API 加类型标注；用 `@dataclass`（**不要** `slots=True`，3.10 才支持）
+- 禁止使用仅 3.10+ 的运行时特性（如 `match`、dataclass slots）
 - 格式：4 空格缩进；字符串默认双引号
 - 禁止无意义注释；注释只解释非显而易见的约束（权限、丢帧策略、协议边界）
 
@@ -223,5 +232,6 @@ magic = b"RD01"
 2. 改动流畅性相关逻辑时，说明对“丢帧 / 延迟 / CPU”的影响
 3. 不主动扩展文件传输、中继服务器等大功能，除非用户明确要求
 4. 用户可见说明更新 `README.md`；设计规范更新本文件
-5. GUI 统一 PySide6；禁止再引入 tkinter/pygame 作为主界面或远程画面渲染路径
+5. GUI 统一经 `qt_bind.py`；禁止再引入 tkinter/pygame 作为主界面或远程画面渲染路径
 6. 新增可见文案必须同时写入 `i18n.py` 的 `zh_CN` 与 `en_US`
+7. 改动 Qt API 时同时验证 PySide2（18.04）与 PySide6（回退）语义

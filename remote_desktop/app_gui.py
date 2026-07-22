@@ -4,11 +4,18 @@ import logging
 import threading
 import time
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QBrush
-from PySide6.QtWidgets import (
+from .qt_bind import (
+    AA_DontShowIconsInMenus,
+    Cancel,
+    DialogAccepted,
+    Horizontal,
+    NoEditTriggers,
+    Password,
+    PointingHandCursor,
     QApplication,
+    QBrush,
     QCheckBox,
+    QColor,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -25,8 +32,18 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTimer,
     QVBoxLayout,
     QWidget,
+    Save,
+    SelectRows,
+    Signal,
+    SingleSelection,
+    Stretch,
+    UserRole,
+    WA_DeleteOnClose,
+    Yes,
+    dialog_exec,
 )
 
 from .client import RemoteClientWindow
@@ -57,7 +74,7 @@ class DeviceDialog(QDialog):
         self.host = QLineEdit(device.host if device else "")
         self.port = QLineEdit(str(device.port if device else 5959))
         self.password = QLineEdit(device.password if device else "")
-        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password.setEchoMode(Password)
         self.notes = QLineEdit(device.notes if device else "")
         form.addRow(i18n.t("field_name"), self.name)
         form.addRow(i18n.t("field_host"), self.host)
@@ -66,10 +83,10 @@ class DeviceDialog(QDialog):
         form.addRow(i18n.t("field_notes"), self.notes)
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+            Save | Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText(i18n.t("save"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(i18n.t("cancel"))
+        buttons.button(Save).setText(i18n.t("save"))
+        buttons.button(Cancel).setText(i18n.t("cancel"))
         buttons.accepted.connect(self._ok)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
@@ -140,10 +157,10 @@ class SettingsDialog(QDialog):
         form.addRow(hint)
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+            Save | Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText(i18n.t("save"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(i18n.t("cancel"))
+        buttons.button(Save).setText(i18n.t("save"))
+        buttons.button(Cancel).setText(i18n.t("cancel"))
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
@@ -194,7 +211,7 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = QSplitter(Horizontal)
         outer.addWidget(splitter)
 
         # Side panel
@@ -243,7 +260,7 @@ class MainWindow(QMainWindow):
         self.lbl_ips.setWordWrap(True)
 
         self.btn_host = QPushButton()
-        self.btn_host.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_host.setCursor(PointingHandCursor)
         self.btn_host.clicked.connect(self._toggle_host)
         self._style_accent_button(self.btn_host)
 
@@ -308,11 +325,11 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self.search, 1)
 
         self.table = QTableWidget(0, 4)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(SelectRows)
+        self.table.setSelectionMode(SingleSelection)
+        self.table.setEditTriggers(NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(Stretch)
         self.table.doubleClicked.connect(self._connect_selected)
 
         actions = QHBoxLayout()
@@ -452,7 +469,7 @@ class MainWindow(QMainWindow):
             ]
             for c, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                item.setData(Qt.ItemDataRole.UserRole, device.id)
+                item.setData(UserRole, device.id)
                 if c == 2:
                     item.setForeground(QBrush(color))
                 self.table.setItem(r, c, item)
@@ -461,12 +478,12 @@ class MainWindow(QMainWindow):
         items = self.table.selectedItems()
         if not items:
             return None
-        device_id = items[0].data(Qt.ItemDataRole.UserRole)
+        device_id = items[0].data(UserRole)
         return self.store.get(str(device_id))
 
     def _add_device(self) -> None:
         dialog = DeviceDialog(self, i18n.t("add_title"))
-        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.result_device:
+        if dialog_exec(dialog) == DialogAccepted and dialog.result_device:
             self.store.upsert(dialog.result_device)
             self._reload_table()
             self._set_status(i18n.t("added", name=dialog.result_device.name))
@@ -478,7 +495,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, i18n.t("tip"), i18n.t("select_device"))
             return
         dialog = DeviceDialog(self, i18n.t("edit_title"), device)
-        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.result_device:
+        if dialog_exec(dialog) == DialogAccepted and dialog.result_device:
             self.store.upsert(dialog.result_device)
             self._reload_table()
             self._set_status(i18n.t("updated", name=dialog.result_device.name))
@@ -494,7 +511,7 @@ class MainWindow(QMainWindow):
                 i18n.t("confirm"),
                 i18n.t("delete_confirm", name=device.name),
             )
-            != QMessageBox.StandardButton.Yes
+            != Yes
         ):
             return
         self.store.remove(device.id)
@@ -504,7 +521,7 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self, self.store)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        if dialog_exec(dialog) != DialogAccepted:
             return
         i18n.set_lang(self.store.settings.language)
         self._set_status(i18n.t("settings_saved"))
@@ -615,13 +632,13 @@ class MainWindow(QMainWindow):
             self,
             i18n.t("quick_connect"),
             i18n.t("quick_password"),
-            echo=QLineEdit.EchoMode.Password,
+            echo=Password,
         )
         if not ok:
             return
         save = (
             QMessageBox.question(self, i18n.t("quick_connect"), i18n.t("quick_save"))
-            == QMessageBox.StandardButton.Yes
+            == Yes
         )
         device_id = None
         if save:
@@ -652,7 +669,7 @@ class MainWindow(QMainWindow):
         )
         # Same QApplication: no subprocess, shared fonts/i18n, less flicker risk.
         win = RemoteClientWindow(cfg, parent=None)
-        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        win.setAttribute(WA_DeleteOnClose, True)
         self._viewers.append(win)
 
         def _drop(*_: object, window: RemoteClientWindow = win) -> None:
@@ -710,9 +727,9 @@ def run_app() -> None:
     app = QApplication.instance() or QApplication([])
     apply_app_font(app)
     # Avoid unnecessary style animations that can worsen perceived flicker.
-    app.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, False)
+    app.setAttribute(AA_DontShowIconsInMenus, False)
     win = MainWindow()
     win.show()
     # Defer first probe slightly so UI paints first.
     QTimer.singleShot(200, win._probe_now)
-    app.exec()
+    (getattr(app, 'exec_', None) or app.exec)()
