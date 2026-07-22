@@ -245,6 +245,10 @@ DialogWindow = _enum(
     getattr(Qt, "Dialog", None),
     getattr(getattr(Qt, "WindowType", None), "Dialog", None),
 )
+WindowTypeFlag = _enum(
+    getattr(Qt, "Window", None),
+    getattr(getattr(Qt, "WindowType", None), "Window", None),
+)
 SmoothPixmapTransform = _enum(
     getattr(QPainter, "SmoothPixmapTransform", None),
     getattr(getattr(QPainter, "RenderHint", None), "SmoothPixmapTransform", None),

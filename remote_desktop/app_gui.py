@@ -1373,7 +1373,8 @@ class MainWindow(QMainWindow):
             return
 
         net = NetConfig(host=host, port=port, password=password)
-        win = DirectTerminalWindow(net=net, title=title, parent=None, reconnect=True)
+        # Child of main window, modeless — does not block the home UI.
+        win = DirectTerminalWindow(net=net, title=title, parent=self, reconnect=True)
         win.device_id = device_id
         win.setAttribute(WA_DeleteOnClose, True)
         self._terminals.append(win)

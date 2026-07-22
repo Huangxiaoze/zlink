@@ -23,6 +23,7 @@ from .qt_bind import (
     QVBoxLayout,
     QWidget,
     WA_StyledBackground,
+    WindowTypeFlag,
     dialog_exec,
     make_window_flags,
     qt_enum_eq,
@@ -44,21 +45,40 @@ def _global_pos(event):
     return event.globalPos()
 
 
-def _make_frameless(dialog: QDialog) -> None:
-    """Drop the native Windows title bar; use in-dialog chrome instead."""
+def _make_frameless(
+    dialog: QDialog,
+    modal: bool = True,
+    *,
+    as_window: bool = False,
+) -> None:
+    """Drop the native Windows title bar; use in-dialog chrome instead.
+
+    ``as_window=True`` uses Qt.Window so minimize/maximize work (needed for
+    long-lived tool windows like the remote terminal).
+    """
     # PySide2 needs Qt.WindowFlags(...), not enum|enum or a plain int.
-    dialog.setWindowFlags(make_window_flags(DialogWindow, FramelessWindowHint))
+    base = WindowTypeFlag if as_window else DialogWindow
+    dialog.setWindowFlags(make_window_flags(base, FramelessWindowHint))
     dialog.setAttribute(WA_StyledBackground, True)
-    dialog.setModal(True)
+    dialog.setModal(bool(modal))
 
 
 class _DragBar(QFrame):
     """Caption strip that can drag a frameless dialog."""
 
-    def __init__(self, host: QDialog, title: str, kind: str = "info", danger: bool = False) -> None:
+    def __init__(
+        self,
+        host: QDialog,
+        title: str,
+        kind: str = "info",
+        danger: bool = False,
+        *,
+        window_controls: bool = False,
+    ) -> None:
         super().__init__(host)
         self._host = host
         self._drag_offset = None
+        self._window_controls = bool(window_controls)
         self.setObjectName("dialogTitleBar")
         self.setAttribute(WA_StyledBackground, True)
         # Keep kind/danger for callers; accent stripe was removed as visual noise.
@@ -67,21 +87,61 @@ class _DragBar(QFrame):
 
         row = QHBoxLayout(self)
         row.setContentsMargins(16, 10, 10, 8)
-        row.setSpacing(8)
+        row.setSpacing(4)
         self.lbl_title = QLabel(title)
         self.lbl_title.setObjectName("dialogCaption")
         row.addWidget(self.lbl_title, 1)
 
+        self.btn_min: QPushButton | None = None
+        self.btn_max: QPushButton | None = None
+        if self._window_controls:
+            self.btn_min = QPushButton("–")
+            self.btn_min.setObjectName("dialogClose")
+            self.btn_min.setToolTip(i18n.t("window_minimize"))
+            self.btn_min.setCursor(PointingHandCursor)
+            self.btn_min.setFocusPolicy(NoFocus)
+            self.btn_min.setFixedSize(32, 28)
+            self.btn_min.clicked.connect(host.showMinimized)
+            row.addWidget(self.btn_min, 0)
+
+            self.btn_max = QPushButton("□")
+            self.btn_max.setObjectName("dialogClose")
+            self.btn_max.setToolTip(i18n.t("window_maximize"))
+            self.btn_max.setCursor(PointingHandCursor)
+            self.btn_max.setFocusPolicy(NoFocus)
+            self.btn_max.setFixedSize(32, 28)
+            self.btn_max.clicked.connect(self._toggle_max)
+            row.addWidget(self.btn_max, 0)
+
         btn_close = QPushButton("×")
         btn_close.setObjectName("dialogClose")
+        btn_close.setToolTip(i18n.t("close_action"))
         btn_close.setCursor(PointingHandCursor)
         btn_close.setFocusPolicy(NoFocus)
         btn_close.setFixedSize(32, 28)
         btn_close.clicked.connect(host.reject)
         row.addWidget(btn_close, 0)
+        self._sync_max_btn()
+
+    def _toggle_max(self) -> None:
+        if self._host.isMaximized():
+            self._host.showNormal()
+        else:
+            self._host.showMaximized()
+        self._sync_max_btn()
+
+    def _sync_max_btn(self) -> None:
+        if self.btn_max is None:
+            return
+        if self._host.isMaximized():
+            self.btn_max.setText("❐")
+            self.btn_max.setToolTip(i18n.t("window_restore"))
+        else:
+            self.btn_max.setText("□")
+            self.btn_max.setToolTip(i18n.t("window_maximize"))
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        if qt_enum_eq(event.button(), LeftButton):
+        if qt_enum_eq(event.button(), LeftButton) and not self._host.isMaximized():
             self._drag_offset = _global_pos(event) - self._host.frameGeometry().topLeft()
         super().mousePressEvent(event)
 
@@ -91,13 +151,20 @@ class _DragBar(QFrame):
             pressed = bool(event.buttons() & LeftButton)
         except TypeError:
             pressed = self._drag_offset is not None
-        if self._drag_offset is not None and pressed:
+        if self._drag_offset is not None and pressed and not self._host.isMaximized():
             self._host.move(_global_pos(event) - self._drag_offset)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         self._drag_offset = None
         super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if self._window_controls and qt_enum_eq(event.button(), LeftButton):
+            self._toggle_max()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 class ThemedDialog(QDialog):

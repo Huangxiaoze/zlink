@@ -57,6 +57,13 @@ def _shade(color: str, factor: float) -> str:
     return "#%02X%02X%02X" % (r, g, b)
 
 
+def _contrast_text(bg: str, light: str = "#FFFFFF", dark: str = "#14212B") -> str:
+    """Pick readable text for a solid accent/button background (YIQ)."""
+    r, g, b = _hex_to_rgb(bg)
+    yiq = (r * 299 + g * 587 + b * 114) / 1000.0
+    return dark if yiq >= 160 else light
+
+
 @dataclass(frozen=True)
 class ThemeColors:
     id: str
@@ -727,8 +734,9 @@ NOIR = ThemeColors(
     text="#F0F0F2",
     muted="#9A9AA4",
     line="#2A2A32",
-    accent="#E8E8EC",
-    accent_2="#C8C8D0",
+    # Mid silver — stays “mono” but keeps primary buttons readable.
+    accent="#B8B8C4",
+    accent_2="#9A9AA8",
     danger="#E05555",
     danger_hover="#C94444",
     warn="#E0B04A",
@@ -1046,6 +1054,9 @@ def build_stylesheet(theme_id: str | None = None) -> str:
     primary_pressed = _shade(c.accent_2, 0.82)
     danger_pressed = _shade(c.danger_hover, 0.85)
     ghost_pressed = _shade(c.ghost_hover, 0.88)
+    # Light accents (e.g. noir) need dark label text; dark accents keep white.
+    on_accent = _contrast_text(c.accent)
+    on_accent_2 = _contrast_text(c.accent_2)
     return f"""
 QMainWindow, QWidget#root {{
     background: {c.bg};
@@ -1151,7 +1162,7 @@ QLineEdit, QAbstractSpinBox {{
     padding: 8px 12px;
     min-height: 18px;
     selection-background-color: {c.accent};
-    selection-color: #FFFFFF;
+    selection-color: {on_accent};
 }}
 QLineEdit:hover, QAbstractSpinBox:hover {{
     border-color: {c.accent};
@@ -1272,15 +1283,17 @@ QMenu::separator {{
 }}
 QPushButton#primary {{
     background: {c.accent};
-    color: #FFFFFF;
+    color: {on_accent};
     border: none;
     font-weight: 700;
 }}
 QPushButton#primary:hover {{
     background: {c.accent_2};
+    color: {on_accent_2};
 }}
 QPushButton#primary:pressed {{
     background: {primary_pressed};
+    color: {on_accent_2};
     padding: 9px 13px 7px 15px;
 }}
 QPushButton#danger {{
@@ -1433,7 +1446,7 @@ QLineEdit#confirmInput {{
     padding: 8px 12px;
     min-height: 20px;
     selection-background-color: {c.accent};
-    selection-color: #FFFFFF;
+    selection-color: {on_accent};
 }}
 QLineEdit#confirmInput:focus {{
     border-color: {c.accent};
@@ -1472,7 +1485,7 @@ QPushButton#confirmCancel:pressed {{
 }}
 QPushButton#confirmOk {{
     background: {c.accent};
-    color: #FFFFFF;
+    color: {on_accent};
     border: none;
     border-radius: 8px;
     padding: 9px 18px;
@@ -1481,19 +1494,24 @@ QPushButton#confirmOk {{
 }}
 QPushButton#confirmOk:hover {{
     background: {c.accent_2};
+    color: {on_accent_2};
 }}
 QPushButton#confirmOk:pressed {{
     background: {primary_pressed};
+    color: {on_accent_2};
     padding: 10px 17px 8px 19px;
 }}
 QPushButton#confirmOk[danger="true"] {{
     background: {c.danger};
+    color: #FFFFFF;
 }}
 QPushButton#confirmOk[danger="true"]:hover {{
     background: {c.danger_hover};
+    color: #FFFFFF;
 }}
 QPushButton#confirmOk[danger="true"]:pressed {{
     background: {danger_pressed};
+    color: #FFFFFF;
 }}
 QPushButton#remoteNavBtn {{
     background: {c.btn_bg};

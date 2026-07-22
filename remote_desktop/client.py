@@ -779,7 +779,7 @@ class RemoteClientWindow(QMainWindow):
         if self._terminal is None:
             return
         try:
-            self._terminal.close()
+            self._terminal.force_close()
         except RuntimeError:
             pass
         self._terminal = None

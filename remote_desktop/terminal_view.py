@@ -9,7 +9,7 @@ from typing import Callable, Optional
 
 from . import PROTOCOL_VERSION
 from .config import NetConfig
-from .confirm_dialog import DialogDragBar, make_frameless_dialog
+from .confirm_dialog import DialogDragBar, ask_confirm, make_frameless_dialog
 from .i18n import i18n
 from .net import Connection, connect_to
 from .protocol import MsgType, ProtocolError, decode_json, pack_term_message
@@ -29,17 +29,12 @@ from .qt_bind import (
     Key_Right,
     Key_Tab,
     Key_Up,
-    NoFocus,
-    PointingHandCursor,
     QColor,
     QDialog,
     QFont,
     QFontMetrics,
-    QHBoxLayout,
-    QLabel,
     QObject,
     QPainter,
-    QPushButton,
     QTimer,
     QVBoxLayout,
     QWidget,
@@ -231,50 +226,46 @@ class RemoteTerminalWindow(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("confirmDialog")
-        make_frameless_dialog(self)
-        self.setWindowTitle(i18n.t("terminal_title"))
+        make_frameless_dialog(self, modal=False, as_window=True)
         self.setMinimumSize(720, 420)
         self.resize(960, 560)
         self._send_packet = send_packet
         self._opened = False
         self._closed = False
+        self._allow_close = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(DialogDragBar(self, i18n.t("terminal_title"), "info", False))
+        self._drag = DialogDragBar(
+            self, i18n.t("terminal_title"), "info", False, window_controls=True
+        )
+        root.addWidget(self._drag)
 
         body = QWidget()
         body_l = QVBoxLayout(body)
         body_l.setContentsMargins(12, 10, 12, 12)
-        body_l.setSpacing(8)
-
-        head = QHBoxLayout()
-        self.lbl_status = QLabel(i18n.t("terminal_connecting"))
-        self.lbl_status.setObjectName("confirmMessage")
-        head.addWidget(self.lbl_status, 1)
-        self.btn_close = QPushButton(i18n.t("close_action"))
-        self.btn_close.setObjectName("confirmCancel")
-        self.btn_close.setCursor(PointingHandCursor)
-        self.btn_close.setFocusPolicy(NoFocus)
-        self.btn_close.clicked.connect(self.reject)
-        head.addWidget(self.btn_close)
-        body_l.addLayout(head)
-
+        body_l.setSpacing(0)
         self.canvas = TerminalCanvas()
         self.canvas.set_input_handler(self._send_input)
         body_l.addWidget(self.canvas, 1)
         root.addWidget(body)
         self.setAttribute(WA_StyledBackground, True)
+        self._set_status(i18n.t("terminal_connecting"))
 
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._emit_resize)
 
         if pyte is None:
-            self.lbl_status.setText(i18n.t("terminal_need_pyte"))
+            self._set_status(i18n.t("terminal_need_pyte"))
         else:
             QTimer.singleShot(0, self._open_session)
+
+    def _set_status(self, status: str) -> None:
+        caption = i18n.t("terminal_caption", status=status)
+        self._drag.lbl_title.setText(caption)
+        self.setWindowTitle(caption)
 
     def handle_term_payload(self, payload: bytes) -> None:
         from .protocol import unpack_term_message
@@ -283,18 +274,20 @@ class RemoteTerminalWindow(QDialog):
         op = str(meta.get("op") or "")
         if op == "open_ok":
             self._opened = True
-            self.lbl_status.setText(i18n.t("terminal_ready"))
+            self._set_status(i18n.t("terminal_ready"))
             self.canvas.setFocus()
         elif op == "open_err":
             self._opened = False
-            self.lbl_status.setText(
+            self._set_status(
                 i18n.t("terminal_failed", error=str(meta.get("error") or "open failed"))
             )
         elif op == "data":
             self.canvas.feed(blob)
         elif op == "closed":
             self._opened = False
-            self.lbl_status.setText(i18n.t("terminal_closed"))
+            self._set_status(i18n.t("terminal_closed"))
+            # Shell exited (e.g. user typed exit) — close window without prompt.
+            QTimer.singleShot(0, self.force_close)
 
     def _open_session(self) -> None:
         cols, rows = self.canvas.size_hint_cells()
@@ -302,7 +295,7 @@ class RemoteTerminalWindow(QDialog):
         try:
             self._send_packet(pack_term_message({"op": "open", "cols": cols, "rows": rows}))
         except Exception as exc:
-            self.lbl_status.setText(i18n.t("terminal_failed", error=str(exc)))
+            self._set_status(i18n.t("terminal_failed", error=str(exc)))
 
     def _send_input(self, data: bytes) -> None:
         if not data or self._closed:
@@ -310,7 +303,7 @@ class RemoteTerminalWindow(QDialog):
         try:
             self._send_packet(pack_term_message({"op": "data"}, data))
         except Exception as exc:
-            self.lbl_status.setText(i18n.t("terminal_failed", error=str(exc)))
+            self._set_status(i18n.t("terminal_failed", error=str(exc)))
 
     def _emit_resize(self) -> None:
         if not self._opened or self._closed:
@@ -326,11 +319,37 @@ class RemoteTerminalWindow(QDialog):
         super().resizeEvent(event)
         self._resize_timer.start(180)
 
+    def _confirm_close(self) -> bool:
+        if self._allow_close or self._closed:
+            return True
+        return ask_confirm(
+            self,
+            title=i18n.t("terminal_close_title"),
+            message=i18n.t("terminal_close_confirm"),
+            eyebrow=i18n.t("confirm"),
+            ok_text=i18n.t("close_action"),
+            cancel_text=i18n.t("cancel"),
+            danger=True,
+        )
+
+    def force_close(self) -> None:
+        """Close without confirmation (session teardown)."""
+        self._allow_close = True
+        self._shutdown()
+        self.close()
+
     def reject(self) -> None:
+        if not self._confirm_close():
+            return
+        self._allow_close = True
         self._shutdown()
         super().reject()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if not self._confirm_close():
+            event.ignore()
+            return
+        self._allow_close = True
         self._shutdown()
         super().closeEvent(event)
 
@@ -363,12 +382,12 @@ class DirectTerminalWindow(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("confirmDialog")
-        make_frameless_dialog(self)
+        # Modeless tool window: stays usable with main UI; supports min/max.
+        make_frameless_dialog(self, modal=False, as_window=True)
         self.net = net
         self.reconnect = reconnect
         self.device_id: Optional[str] = None
         self._title = title or net.host
-        self.setWindowTitle(i18n.t("terminal_direct_title", name=self._title))
         self.setMinimumSize(720, 420)
         self.resize(960, 560)
 
@@ -377,6 +396,7 @@ class DirectTerminalWindow(QDialog):
         self._conn_lock = threading.Lock()
         self._opened = False
         self._shell_closed = False
+        self._allow_close = False
         self._net_thread: Optional[threading.Thread] = None
         self._bus = _TermBus()
         self._bus.status.connect(self._on_status)
@@ -387,42 +407,40 @@ class DirectTerminalWindow(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(
-            DialogDragBar(self, i18n.t("terminal_direct_title", name=self._title), "info", False)
+        self._drag = DialogDragBar(
+            self,
+            i18n.t("terminal_direct_title", name=self._title),
+            "info",
+            False,
+            window_controls=True,
         )
+        root.addWidget(self._drag)
 
         body = QWidget()
         body_l = QVBoxLayout(body)
         body_l.setContentsMargins(12, 10, 12, 12)
-        body_l.setSpacing(8)
-
-        head = QHBoxLayout()
-        self.lbl_status = QLabel(i18n.t("viewer_connecting"))
-        self.lbl_status.setObjectName("confirmMessage")
-        head.addWidget(self.lbl_status, 1)
-        self.btn_close = QPushButton(i18n.t("close_action"))
-        self.btn_close.setObjectName("confirmCancel")
-        self.btn_close.setCursor(PointingHandCursor)
-        self.btn_close.setFocusPolicy(NoFocus)
-        self.btn_close.clicked.connect(self.reject)
-        head.addWidget(self.btn_close)
-        body_l.addLayout(head)
-
+        body_l.setSpacing(0)
         self.canvas = TerminalCanvas()
         self.canvas.set_input_handler(self._send_input)
         body_l.addWidget(self.canvas, 1)
         root.addWidget(body)
         self.setAttribute(WA_StyledBackground, True)
+        self._set_status(i18n.t("viewer_connecting"))
 
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._emit_resize)
 
+    def _set_status(self, status: str) -> None:
+        caption = i18n.t("terminal_direct_caption", name=self._title, status=status)
+        self._drag.lbl_title.setText(caption)
+        self.setWindowTitle(caption)
+
     def start(self) -> None:
         if self._net_thread is not None and self._net_thread.is_alive():
             return
         if pyte is None:
-            self.lbl_status.setText(i18n.t("terminal_need_pyte"))
+            self._set_status(i18n.t("terminal_need_pyte"))
             return
         self._stop.clear()
         self._net_thread = threading.Thread(
@@ -441,11 +459,37 @@ class DirectTerminalWindow(QDialog):
                 pass
             conn.close()
 
+    def _confirm_close(self) -> bool:
+        if self._allow_close:
+            return True
+        return ask_confirm(
+            self,
+            title=i18n.t("terminal_close_title"),
+            message=i18n.t("terminal_close_confirm"),
+            eyebrow=i18n.t("confirm"),
+            ok_text=i18n.t("close_action"),
+            cancel_text=i18n.t("cancel"),
+            danger=True,
+        )
+
+    def force_close(self) -> None:
+        """Close without confirmation (app/session teardown)."""
+        self._allow_close = True
+        self.stop()
+        self.close()
+
     def reject(self) -> None:
+        if not self._confirm_close():
+            return
+        self._allow_close = True
         self.stop()
         super().reject()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if not self._confirm_close():
+            event.ignore()
+            return
+        self._allow_close = True
         self.stop()
         super().closeEvent(event)
 
@@ -454,21 +498,21 @@ class DirectTerminalWindow(QDialog):
         self._resize_timer.start(180)
 
     def _on_status(self, text: str) -> None:
-        self.lbl_status.setText(text)
+        self._set_status(text)
 
     def _on_session_ended(self, text: str) -> None:
         self._opened = False
         if text:
-            self.lbl_status.setText(text)
+            self._set_status(text)
 
     def _on_connected(self) -> None:
         cols, rows = self.canvas.size_hint_cells()
         self.canvas.resize_screen(cols, rows)
-        self.lbl_status.setText(i18n.t("terminal_connecting"))
+        self._set_status(i18n.t("terminal_connecting"))
         try:
             self._send_raw(pack_term_message({"op": "open", "cols": cols, "rows": rows}))
         except Exception as exc:
-            self.lbl_status.setText(i18n.t("terminal_failed", error=str(exc)))
+            self._set_status(i18n.t("terminal_failed", error=str(exc)))
 
     def _on_term_payload(self, payload: object) -> None:
         if payload is None:
@@ -478,17 +522,17 @@ class DirectTerminalWindow(QDialog):
         try:
             meta, blob = unpack_term_message(bytes(payload))
         except Exception as exc:
-            self.lbl_status.setText(i18n.t("terminal_failed", error=str(exc)))
+            self._set_status(i18n.t("terminal_failed", error=str(exc)))
             return
         op = str(meta.get("op") or "")
         if op == "open_ok":
             self._opened = True
             self._shell_closed = False
-            self.lbl_status.setText(i18n.t("terminal_ready"))
+            self._set_status(i18n.t("terminal_ready"))
             self.canvas.setFocus()
         elif op == "open_err":
             self._opened = False
-            self.lbl_status.setText(
+            self._set_status(
                 i18n.t("terminal_failed", error=str(meta.get("error") or "open failed"))
             )
         elif op == "data":
@@ -496,7 +540,10 @@ class DirectTerminalWindow(QDialog):
         elif op == "closed":
             self._opened = False
             self._shell_closed = True
-            self.lbl_status.setText(i18n.t("terminal_closed"))
+            self._set_status(i18n.t("terminal_closed"))
+            # Shell exited (e.g. user typed exit) — disconnect and close UI.
+            self.reconnect = False
+            QTimer.singleShot(0, self.force_close)
 
     def _send_raw(self, packet: bytes) -> None:
         with self._conn_lock:
