@@ -7,6 +7,9 @@ from typing import Optional, Tuple
 from .i18n import i18n
 from .qt_bind import (
     DialogAccepted,
+    DialogWindow,
+    FramelessWindowHint,
+    LeftButton,
     NoFocus,
     Password,
     PointingHandCursor,
@@ -33,6 +36,67 @@ def _polish(*widgets: QWidget) -> None:
         widget.update()
 
 
+def _global_pos(event):
+    if hasattr(event, "globalPosition"):
+        return event.globalPosition().toPoint()
+    return event.globalPos()
+
+
+def _make_frameless(dialog: QDialog) -> None:
+    """Drop the native Windows title bar; use in-dialog chrome instead."""
+    dialog.setWindowFlags(DialogWindow | FramelessWindowHint)
+    dialog.setAttribute(WA_StyledBackground, True)
+    dialog.setModal(True)
+
+
+class _DragBar(QFrame):
+    """Caption strip that can drag a frameless dialog."""
+
+    def __init__(self, host: QDialog, title: str, kind: str = "info", danger: bool = False) -> None:
+        super().__init__(host)
+        self._host = host
+        self._drag_offset = None
+        self.setObjectName("dialogTitleBar")
+        self.setAttribute(WA_StyledBackground, True)
+        # Keep kind/danger for callers; accent stripe was removed as visual noise.
+        self.setProperty("kind", kind)
+        self.setProperty("danger", "true" if danger else "false")
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(16, 10, 10, 8)
+        row.setSpacing(8)
+        self.lbl_title = QLabel(title)
+        self.lbl_title.setObjectName("dialogCaption")
+        row.addWidget(self.lbl_title, 1)
+
+        btn_close = QPushButton("×")
+        btn_close.setObjectName("dialogClose")
+        btn_close.setCursor(PointingHandCursor)
+        btn_close.setFocusPolicy(NoFocus)
+        btn_close.setFixedSize(32, 28)
+        btn_close.clicked.connect(host.reject)
+        row.addWidget(btn_close, 0)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if qt_enum_eq(event.button(), LeftButton):
+            self._drag_offset = _global_pos(event) - self._host.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        pressed = False
+        try:
+            pressed = bool(event.buttons() & LeftButton)
+        except TypeError:
+            pressed = self._drag_offset is not None
+        if self._drag_offset is not None and pressed:
+            self._host.move(_global_pos(event) - self._drag_offset)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
+
+
 class ThemedDialog(QDialog):
     """Shared chrome for alerts, confirms, and simple prompts."""
 
@@ -56,8 +120,7 @@ class ThemedDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("confirmDialog")
-        self.setAttribute(WA_StyledBackground, True)
-        self.setModal(True)
+        _make_frameless(self)
         self.setWindowTitle(title)
         self.setMinimumWidth(420)
         self.setMaximumWidth(520)
@@ -75,17 +138,11 @@ class ThemedDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-        accent = QFrame()
-        accent.setObjectName("confirmAccent")
-        accent.setAttribute(WA_StyledBackground, True)
-        accent.setProperty("kind", kind)
-        accent.setProperty("danger", "true" if danger else "false")
-        root.addWidget(accent)
+        root.addWidget(_DragBar(self, title, kind, danger))
 
         body = QWidget()
         body_l = QVBoxLayout(body)
-        body_l.setContentsMargins(24, 20, 24, 16)
+        body_l.setContentsMargins(24, 16, 24, 16)
         body_l.setSpacing(10)
 
         if eyebrow:
@@ -150,7 +207,7 @@ class ThemedDialog(QDialog):
         foot.addWidget(btn_ok)
 
         root.addWidget(footer)
-        _polish(accent, btn_ok)
+        _polish(btn_ok)
 
         if self._input is not None:
             self._input.setFocus()
@@ -283,8 +340,7 @@ class QuickConnectDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("confirmDialog")
-        self.setAttribute(WA_StyledBackground, True)
-        self.setModal(True)
+        _make_frameless(self)
         self.setWindowTitle(i18n.t("quick_connect"))
         self.setMinimumWidth(420)
         self.setMaximumWidth(520)
@@ -295,17 +351,11 @@ class QuickConnectDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-        accent = QFrame()
-        accent.setObjectName("confirmAccent")
-        accent.setAttribute(WA_StyledBackground, True)
-        accent.setProperty("kind", "info")
-        accent.setProperty("danger", "false")
-        root.addWidget(accent)
+        root.addWidget(_DragBar(self, i18n.t("quick_connect"), "info", False))
 
         body = QWidget()
         body_l = QVBoxLayout(body)
-        body_l.setContentsMargins(24, 20, 24, 16)
+        body_l.setContentsMargins(24, 16, 24, 16)
         body_l.setSpacing(10)
 
         lbl_eye = QLabel(i18n.t("tip"))
@@ -368,7 +418,7 @@ class QuickConnectDialog(QDialog):
         foot.addWidget(btn_ok)
         root.addWidget(footer)
 
-        _polish(accent, btn_ok)
+        _polish(btn_ok)
         self.edit_host.setFocus()
 
     def _ok(self) -> None:
@@ -390,3 +440,8 @@ def ask_quick_connect(
     if not qt_enum_eq(dialog_exec(dialog), DialogAccepted):
         return None
     return dialog.host, dialog.password, dialog.save
+
+
+# Public aliases for other form dialogs (settings / device editor).
+make_frameless_dialog = _make_frameless
+DialogDragBar = _DragBar

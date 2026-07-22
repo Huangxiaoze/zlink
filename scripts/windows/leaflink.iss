@@ -37,7 +37,7 @@ DisableProgramGroupPage=yes
 LicenseFile=
 OutputDir={#RepoRoot}\dist
 OutputBaseFilename={#MyAppName}-Setup-{#MyAppVersion}
-SetupIconFile=
+SetupIconFile={#RepoRoot}\resources\icon\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -52,8 +52,8 @@ CloseApplications=yes
 RestartApplications=no
 
 [Languages]
+Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce

@@ -57,13 +57,17 @@ from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, pro
 from .host import RemoteHost
 from .i18n import i18n
 from .qt_fonts import apply_app_font, ensure_utf8_stdio
+from .app_icon import apply_app_icon
 from .confirm_dialog import (
+    DialogDragBar,
     ask_confirm,
     ask_quick_connect,
+    make_frameless_dialog,
     show_error,
     show_info,
     show_warning,
 )
+from .window_chrome import apply_window_chrome, ensure_windows_app_id
 from .themes import (
     DEFAULT_THEME,
     ThemeColors,
@@ -230,14 +234,21 @@ class DeviceCard(QFrame):
 class DeviceDialog(QDialog):
     def __init__(self, parent: QWidget, title: str, device: Device | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("confirmDialog")
+        make_frameless_dialog(self)
         self.setWindowTitle(title)
-        self.setModal(True)
         self.setMinimumWidth(420)
         self.result_device: Device | None = None
         self._device = device
 
-        form = QFormLayout(self)
-        form.setContentsMargins(20, 20, 20, 16)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(DialogDragBar(self, title, "info", False))
+
+        form_host = QWidget()
+        form = QFormLayout(form_host)
+        form.setContentsMargins(20, 16, 20, 16)
         form.setSpacing(10)
         self.name = QLineEdit(device.name if device else "")
         self.host = QLineEdit(device.host if device else "")
@@ -256,6 +267,7 @@ class DeviceDialog(QDialog):
         buttons.accepted.connect(self._ok)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+        root.addWidget(form_host)
 
     def _ok(self) -> None:
         host = self.host.text().strip()
@@ -288,11 +300,19 @@ class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget, store: DeviceStore) -> None:
         super().__init__(parent)
         self.store = store
+        self.setObjectName("confirmDialog")
+        make_frameless_dialog(self)
         self.setWindowTitle(i18n.t("settings_title"))
-        self.setModal(True)
         self.setMinimumWidth(420)
-        form = QFormLayout(self)
-        form.setContentsMargins(20, 20, 20, 16)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(DialogDragBar(self, i18n.t("settings_title"), "info", False))
+
+        form_host = QWidget()
+        form = QFormLayout(form_host)
+        form.setContentsMargins(20, 16, 20, 16)
         form.setSpacing(10)
 
         self.lang = QComboBox()
@@ -343,6 +363,7 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+        root.addWidget(form_host)
 
     def _apply_hd(self) -> None:
         self.fps.setText("30")
@@ -390,6 +411,7 @@ class MainWindow(QMainWindow):
         self.host_clip_wakeup.connect(self._drain_host_clipboard_in)
 
         self._build()
+        apply_app_icon(self)
         self.retranslate()
         self._refresh_local()
         self._reload_devices()
@@ -397,6 +419,11 @@ class MainWindow(QMainWindow):
         i18n.on_change(self.retranslate)
         # Start hosting after the first UI paint; user can still stop/start manually.
         QTimer.singleShot(0, self._auto_start_host)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # winId() is valid after the native window exists.
+        apply_window_chrome(self, THEME)
 
     def _build(self) -> None:
         self.resize(1120, 700)
@@ -848,6 +875,12 @@ class MainWindow(QMainWindow):
         self.retranslate()
         self._restyle(self.status, "statusBar")
         self._restyle(self.lbl_search, "pageMuted")
+        apply_window_chrome(self, THEME)
+        for viewer in list(self._viewers):
+            try:
+                apply_window_chrome(viewer, THEME)
+            except RuntimeError:
+                pass
         self._set_status(i18n.t("settings_saved"))
 
     def _regen_password(self) -> None:
@@ -1128,14 +1161,17 @@ def _fmt_time(ts: float | None) -> str:
 
 def run_app() -> None:
     ensure_utf8_stdio()
+    ensure_windows_app_id()
     app = QApplication.instance() or QApplication([])
     apply_app_font(app, point_size=10)
     app.setStyle("Fusion")
     app.setAttribute(AA_DontShowIconsInMenus, False)
+    apply_app_icon(app)
     bootstrap = DeviceStore()
     i18n.set_lang(bootstrap.settings.language)
     apply_theme(app, bootstrap.settings.theme)
     win = MainWindow()
     win.show()
+    apply_window_chrome(win, THEME)
     QTimer.singleShot(200, win._probe_now)
     (getattr(app, "exec_", None) or app.exec)()

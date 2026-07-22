@@ -13,6 +13,7 @@ try:
         QFont,
         QFontDatabase,
         QGuiApplication,
+        QIcon,
         QImage,
         QKeyEvent,
         QKeySequence,
@@ -61,6 +62,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QFont,
         QFontDatabase,
         QGuiApplication,
+        QIcon,
         QImage,
         QKeyEvent,
         QKeySequence,
@@ -185,6 +187,10 @@ AA_DontShowIconsInMenus = _enum(
     getattr(Qt, "AA_DontShowIconsInMenus", None),
     getattr(getattr(Qt, "ApplicationAttribute", None), "AA_DontShowIconsInMenus", None),
 )
+LeftButton = _enum(
+    getattr(Qt, "LeftButton", None),
+    getattr(getattr(Qt, "MouseButton", None), "LeftButton", None),
+)
 RightButton = _enum(
     getattr(Qt, "RightButton", None),
     getattr(getattr(Qt, "MouseButton", None), "RightButton", None),
@@ -196,6 +202,14 @@ CustomContextMenu = _enum(
 MiddleButton = _enum(
     getattr(Qt, "MiddleButton", None),
     getattr(getattr(Qt, "MouseButton", None), "MiddleButton", None),
+)
+FramelessWindowHint = _enum(
+    getattr(Qt, "FramelessWindowHint", None),
+    getattr(getattr(Qt, "WindowType", None), "FramelessWindowHint", None),
+)
+DialogWindow = _enum(
+    getattr(Qt, "Dialog", None),
+    getattr(getattr(Qt, "WindowType", None), "Dialog", None),
 )
 SmoothPixmapTransform = _enum(
     getattr(QPainter, "SmoothPixmapTransform", None),
@@ -402,23 +416,35 @@ def make_dialog_button_box(*buttons: Any) -> QDialogButtonBox:
 
     PySide2 rejects ``QDialogButtonBox(Save | Cancel)`` because the OR result is a
     StandardButton enum, not a plain int.
+
+    Standard buttons often get theme icons on Linux (Ubuntu); strip them so the UI
+    matches Windows (text-only).
     """
     flags = 0
     for button in buttons:
         flags |= qt_enum_int(button)
+    box: QDialogButtonBox
     try:
-        return QDialogButtonBox(flags)
+        box = QDialogButtonBox(flags)
     except TypeError:
         std = getattr(QDialogButtonBox, "StandardButtons", None)
         if std is not None:
             try:
-                return QDialogButtonBox(std(flags))
+                box = QDialogButtonBox(std(flags))
             except TypeError:
-                pass
-        box = QDialogButtonBox()
-        for button in buttons:
-            box.addButton(button)
-        return box
+                box = QDialogButtonBox()
+                for button in buttons:
+                    box.addButton(button)
+        else:
+            box = QDialogButtonBox()
+            for button in buttons:
+                box.addButton(button)
+    for btn in box.buttons():
+        try:
+            btn.setIcon(QIcon())
+        except Exception:
+            pass
+    return box
 
 
 def font_db_families() -> list[str]:

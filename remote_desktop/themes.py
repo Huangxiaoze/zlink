@@ -811,18 +811,33 @@ QScrollBar::handle:vertical {{
 QDialog#confirmDialog {{
     background: {c.card};
     color: {c.text};
+    border: 1px solid {c.line};
+    border-radius: 14px;
 }}
-QFrame#confirmAccent {{
-    background: {c.accent};
+QFrame#dialogTitleBar {{
+    background: {c.card};
     border: none;
-    min-height: 4px;
-    max-height: 4px;
+    border-bottom: 1px solid {c.line};
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
 }}
-QFrame#confirmAccent[kind="warn"] {{
-    background: {c.warn};
+QLabel#dialogCaption {{
+    color: {c.text};
+    font-size: 13px;
+    font-weight: 700;
 }}
-QFrame#confirmAccent[kind="danger"], QFrame#confirmAccent[danger="true"] {{
-    background: {c.danger};
+QPushButton#dialogClose {{
+    background: transparent;
+    color: {c.muted};
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 0;
+}}
+QPushButton#dialogClose:hover {{
+    background: {c.btn_hover};
+    color: {c.text};
 }}
 QLabel#confirmEyebrow {{
     color: {c.muted};

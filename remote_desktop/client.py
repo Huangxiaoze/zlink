@@ -8,7 +8,10 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from . import PROTOCOL_VERSION
 from .clipboard_sync import ClipboardBridge
 from .config import ClientConfig
+from .app_icon import apply_app_icon
 from .confirm_dialog import ask_confirm
+from .themes import CURRENT
+from .window_chrome import apply_window_chrome, ensure_windows_app_id
 from .i18n import i18n
 from .net import Connection, connect_to
 from .protocol import MsgType, ProtocolError, decode_json, unpack_frame_message
@@ -296,6 +299,7 @@ class RemoteClientWindow(QMainWindow):
 
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
+        apply_app_icon(self)
 
         self._central = QWidget()
         layout = QVBoxLayout(self._central)
@@ -340,6 +344,10 @@ class RemoteClientWindow(QMainWindow):
         self._sc_pull = QShortcut(QKeySequence("Ctrl+Alt+V"), self)
         self._sc_pull.setContext(WindowShortcut)
         self._sc_pull.activated.connect(self._hotkey_pull_clipboard)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_window_chrome(self, CURRENT)
 
     def _hotkey_push_clipboard(self) -> None:
         if self._clip is not None:
@@ -665,10 +673,13 @@ class RemoteClient:
         from .qt_fonts import apply_app_font, ensure_utf8_stdio
 
         ensure_utf8_stdio()
+        ensure_windows_app_id()
         app = QApplication.instance() or QApplication([])
         apply_app_font(app)
+        apply_app_icon(app)
         win = RemoteClientWindow(self.config)
         win.show()
+        apply_window_chrome(win, CURRENT)
         win.start()
         # PySide2: exec_(); PySide6: exec()
         fn = getattr(app, "exec_", None) or getattr(app, "exec")

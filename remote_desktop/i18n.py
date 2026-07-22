@@ -6,7 +6,7 @@ SUPPORTED_LANGS = ("zh_CN", "en_US")
 
 _STRINGS: dict[str, dict[str, str]] = {
     "zh_CN": {
-        "app_title": "LeafLink 远程桌面",
+        "app_title": "LeafLink",
         "brand": "LeafLink",
         "brand_tag": "清晰 · 稳定 · 跨平台",
         "local_control": "本机远控",
@@ -125,7 +125,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "keep_open": "继续使用",
     },
     "en_US": {
-        "app_title": "LeafLink Remote",
+        "app_title": "LeafLink",
         "brand": "LeafLink",
         "brand_tag": "Sharp · Stable · Cross-platform",
         "local_control": "This PC",

@@ -25,6 +25,8 @@ BUILD = ROOT / "build"
 SCRIPTS = ROOT / "scripts"
 NAME = "LeafLink"
 ISS = SCRIPTS / "windows" / "leaflink.iss"
+ICON_PNG = ROOT / "resources" / "icon" / "favio.png"
+ICON_ICO = ROOT / "resources" / "icon" / "app.ico"
 
 
 def _app_version() -> str:
@@ -34,6 +36,38 @@ def _app_version() -> str:
         if line.startswith("__version__"):
             return line.split("=", 1)[1].strip().strip("\"'")
     return "0.0.0"
+
+
+def _ensure_app_ico() -> Path | None:
+    """Build a multi-size .ico from favio.png for Windows exe / installer."""
+    if not ICON_PNG.is_file():
+        print("WARNING: app icon PNG missing:", ICON_PNG, file=sys.stderr)
+        return ICON_ICO if ICON_ICO.is_file() else None
+    try:
+        from PIL import Image
+    except ImportError:
+        print("WARNING: Pillow missing; cannot generate app.ico", file=sys.stderr)
+        return ICON_ICO if ICON_ICO.is_file() else None
+
+    img = Image.open(ICON_PNG).convert("RGBA")
+    # Drop near-white canvas margins so taskbar/desktop icons look tighter.
+    alpha = img.split()[-1]
+    bbox = alpha.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+    sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+    ICON_ICO.parent.mkdir(parents=True, exist_ok=True)
+    img.save(ICON_ICO, format="ICO", sizes=sizes)
+    print("Icon   :", ICON_ICO)
+    return ICON_ICO
+
+
+def _datas_args() -> list[str]:
+    icon_dir = ROOT / "resources" / "icon"
+    if not icon_dir.is_dir():
+        return []
+    sep = ";" if platform.system().lower() == "windows" else ":"
+    return ["--add-data", "%s%sresources/icon" % (icon_dir, sep)]
 
 
 def _qt_collect_args() -> list[str]:
@@ -61,6 +95,8 @@ def _hidden_imports() -> list[str]:
         "remote_desktop.host",
         "remote_desktop.clipboard_sync",
         "remote_desktop.confirm_dialog",
+        "remote_desktop.app_icon",
+        "remote_desktop.window_chrome",
         "remote_desktop.themes",
         "remote_desktop.qt_bind",
         "remote_desktop.qt_fonts",
@@ -187,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     if args.installer_only:
+        _ensure_app_ico()
         return _build_installer(version)
 
     try:
@@ -203,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Installer packaging needs the onedir tree; --onefile is for portable builds only.
     use_onefile = bool(args.onefile) and not args.installer
+    icon_ico = _ensure_app_ico()
 
     cmd = [
         sys.executable,
@@ -224,10 +262,13 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if not args.console:
         cmd.append("--windowed")
+    if icon_ico is not None:
+        cmd.extend(["--icon", str(icon_ico)])
 
     cmd.extend(_qt_collect_args())
     cmd.extend(["--collect-submodules", "remote_desktop"])
     cmd.extend(_hidden_imports())
+    cmd.extend(_datas_args())
     cmd.append(str(ROOT / "main.py"))
 
     print("Platform:", platform.platform())
