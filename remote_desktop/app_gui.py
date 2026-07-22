@@ -278,12 +278,16 @@ class SettingsDialog(QDialog):
         form.setSpacing(10)
 
         self.lang = QComboBox()
+        self.lang.setCursor(PointingHandCursor)
+        self.lang.setMaxVisibleItems(8)
         self.lang.addItem(i18n.t("lang_zh"), "zh_CN")
         self.lang.addItem(i18n.t("lang_en"), "en_US")
         idx = self.lang.findData(store.settings.language)
         self.lang.setCurrentIndex(max(0, idx))
 
         self.theme = QComboBox()
+        self.theme.setCursor(PointingHandCursor)
+        self.theme.setMaxVisibleItems(12)
         for theme_id in theme_ids():
             label = i18n.t("theme_%s" % theme_id)
             if label == "theme_%s" % theme_id:

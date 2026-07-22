@@ -2,8 +2,30 @@
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Iterable, Tuple
+
+
+def _combo_arrow_url(color: str) -> str:
+    """Write a themed chevron SVG once and return a Qt-friendly file URL."""
+    safe = "".join(ch for ch in color if ch.isalnum())
+    cache = Path(tempfile.gettempdir()) / "leaflink_theme"
+    cache.mkdir(parents=True, exist_ok=True)
+    path = cache / ("combo_arrow_%s.svg" % safe)
+    if not path.exists():
+        path.write_text(
+            (
+                '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12">'
+                '<path d="M2.2 4.3 L6 8.1 L9.8 4.3" fill="none" stroke="%s" '
+                'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'
+                "</svg>"
+            )
+            % color,
+            encoding="utf-8",
+        )
+    return "file:///" + path.resolve().as_posix()
 
 
 @dataclass(frozen=True)
@@ -489,6 +511,8 @@ def iter_themes() -> Iterable[ThemeColors]:
 
 def build_stylesheet(theme_id: str | None = None) -> str:
     c = resolve_theme(theme_id)
+    arrow = _combo_arrow_url(c.muted)
+    arrow_open = _combo_arrow_url(c.accent)
     return f"""
 QMainWindow, QWidget#root {{
     background: {c.bg};
@@ -578,22 +602,81 @@ QFrame#mainCard {{
     border: 1px solid {c.line};
     border-radius: 14px;
 }}
-QLineEdit, QComboBox, QAbstractSpinBox {{
+QLineEdit, QAbstractSpinBox {{
     background: {c.input_bg};
     color: {c.text};
     border: 1px solid {c.input_border};
-    border-radius: 8px;
-    padding: 8px 10px;
+    border-radius: 10px;
+    padding: 8px 12px;
     min-height: 18px;
     selection-background-color: {c.accent};
     selection-color: #FFFFFF;
+}}
+QLineEdit:hover, QAbstractSpinBox:hover {{
+    border-color: {c.accent};
+}}
+QLineEdit:focus, QAbstractSpinBox:focus {{
+    border-color: {c.accent};
+}}
+QComboBox {{
+    background: {c.input_bg};
+    color: {c.text};
+    border: 1px solid {c.input_border};
+    border-radius: 10px;
+    padding: 8px 34px 8px 12px;
+    min-height: 20px;
+    font-weight: 600;
+    combobox-popup: 0;
+}}
+QComboBox:hover {{
+    border-color: {c.accent};
+    background: {c.card_tile_hover};
+}}
+QComboBox:focus, QComboBox:on {{
+    border-color: {c.accent};
+}}
+QComboBox:disabled {{
+    color: {c.muted};
+    background: {c.btn_bg};
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 30px;
+    border: none;
+    background: transparent;
+}}
+QComboBox::down-arrow {{
+    image: url("{arrow}");
+    width: 12px;
+    height: 12px;
+}}
+QComboBox:hover::down-arrow, QComboBox:on::down-arrow {{
+    image: url("{arrow_open}");
 }}
 QComboBox QAbstractItemView {{
     background: {c.card};
     color: {c.text};
     border: 1px solid {c.line};
-    selection-background-color: {c.accent};
-    selection-color: #FFFFFF;
+    border-radius: 10px;
+    padding: 6px;
+    outline: 0;
+    selection-background-color: {c.card_selected};
+    selection-color: {c.text};
+}}
+QComboBox QAbstractItemView::item {{
+    min-height: 30px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    margin: 1px 0;
+}}
+QComboBox QAbstractItemView::item:hover {{
+    background: {c.card_tile_hover};
+    color: {c.text};
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background: {c.card_selected};
+    color: {c.text};
 }}
 QFrame#side QLineEdit {{
     background: {c.side_input_bg};
