@@ -29,6 +29,7 @@ try:
         QDialogButtonBox,
         QFormLayout,
         QFrame,
+        QGridLayout,
         QHBoxLayout,
         QHeaderView,
         QInputDialog,
@@ -37,6 +38,7 @@ try:
         QMainWindow,
         QMessageBox,
         QPushButton,
+        QScrollArea,
         QShortcut,
         QSplitter,
         QTableWidget,
@@ -72,6 +74,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QDialogButtonBox,
         QFormLayout,
         QFrame,
+        QGridLayout,
         QHBoxLayout,
         QHeaderView,
         QInputDialog,
@@ -80,6 +83,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QMainWindow,
         QMessageBox,
         QPushButton,
+        QScrollArea,
         QSplitter,
         QTableWidget,
         QTableWidgetItem,
@@ -117,6 +121,10 @@ WA_DeleteOnClose = _enum(
 StrongFocus = _enum(
     getattr(Qt, "StrongFocus", None),
     getattr(getattr(Qt, "FocusPolicy", None), "StrongFocus", None),
+)
+NoFocus = _enum(
+    getattr(Qt, "NoFocus", None),
+    getattr(getattr(Qt, "FocusPolicy", None), "NoFocus", None),
 )
 MouseFocusReason = _enum(
     getattr(Qt, "MouseFocusReason", None),

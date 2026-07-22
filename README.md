@@ -45,8 +45,8 @@ sudo apt install -y fonts-wqy-microhei
 
 ## 功能
 
-- Qt 设备管理界面（中英文）
-- 本机远控开关 / 设备列表 / 在线探测
+- Qt 设备管理界面（中英文、主题切换）
+- 本机远控开关 / 设备卡片列表 / 在线探测
 - 远程画面防闪烁合帧渲染
 - 键鼠控制
 - **剪贴板同步**：文字/文件（≤64MB）
@@ -70,6 +70,28 @@ python main.py          # GUI
 python main.py host ... # CLI 被控
 python main.py client --host <IP> --password <code>
 ```
+
+主题：设置 → 主题（浅色 / 深色 / 森绿），立即生效并写入本地配置。
+
+## 打包可执行文件
+
+在**目标平台本机**打包（PyInstaller 交叉编译 Qt 应用不可靠）：
+
+| 平台 | 脚本 |
+|------|------|
+| Windows | `powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1` |
+| Linux | `bash scripts/build_linux.sh` |
+| macOS | `bash scripts/build_macos.sh` |
+
+或统一入口：
+
+```bash
+pip install -r requirements.txt -r requirements-build.txt
+python scripts/build.py --clean
+```
+
+产物在 `dist/LeafLink/`（Windows 为 `LeafLink.exe`）。  
+调试 CLI 可加 `--console` 保留终端窗口。
 
 ## 与主分支差异
 

@@ -1,0 +1,2 @@
+# Packaging (install on top of requirements.txt)
+pyinstaller>=5.13,<7

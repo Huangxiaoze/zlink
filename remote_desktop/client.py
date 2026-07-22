@@ -27,8 +27,10 @@ from .qt_bind import (
     Key_Z,
     MiddleButton,
     MouseFocusReason,
+    NoFocus,
     PointingHandCursor,
     QApplication,
+    QHBoxLayout,
     QImage,
     QKeyEvent,
     QKeySequence,
@@ -242,6 +244,31 @@ class RemoteClientWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # Toolbar sits ABOVE the remote picture so controls never cover it.
+        self.toolbar = QWidget()
+        self.toolbar.setObjectName("viewerToolbar")
+        self.toolbar.setFixedHeight(36)
+        self.toolbar.setStyleSheet(
+            "#viewerToolbar { background: #141C24; border-bottom: 1px solid #243040; }"
+            "#viewerToolbar QPushButton {"
+            "  color: #D7E6DF; background: transparent;"
+            "  border: 1px solid #334155; border-radius: 4px;"
+            "  padding: 4px 10px; font-size: 12px;"
+            "}"
+            "#viewerToolbar QPushButton:hover { color: #FFFFFF; border-color: #7DFFCE; }"
+        )
+        bar = QHBoxLayout(self.toolbar)
+        bar.setContentsMargins(10, 4, 10, 4)
+        bar.setSpacing(8)
+        bar.addStretch(1)
+        self.btn_fullscreen = QPushButton(i18n.t("viewer_fullscreen"))
+        self.btn_fullscreen.setCursor(PointingHandCursor)
+        self.btn_fullscreen.setFocusPolicy(NoFocus)
+        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
+        bar.addWidget(self.btn_fullscreen)
+        layout.addWidget(self.toolbar, 0)
+
         self.canvas = RemoteCanvas()
         self.canvas.host_window = self
         self.canvas.on_mouse = self._handle_mouse
@@ -250,19 +277,6 @@ class RemoteClientWindow(QMainWindow):
         self.canvas.on_local_key = self._handle_local_key
         layout.addWidget(self.canvas, 1)
         self.setCentralWidget(central)
-
-        self.btn_fullscreen = QPushButton(i18n.t("viewer_fullscreen"), self.canvas)
-        self.btn_fullscreen.setCursor(PointingHandCursor)
-        self.btn_fullscreen.setStyleSheet(
-            "QPushButton {"
-            "  color: #E8FFF4; background: rgba(20,28,36,180);"
-            "  border: 1px solid rgba(125,255,206,90); border-radius: 6px;"
-            "  padding: 6px 12px; font-size: 12px; font-weight: 600;"
-            "}"
-            "QPushButton:hover { background: rgba(30,44,54,210); }"
-        )
-        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
-        self.btn_fullscreen.raise_()
 
         self._bus.frame_jpeg.connect(self._on_frame_jpeg)
         self._bus.status.connect(self._on_status)
@@ -283,8 +297,6 @@ class RemoteClientWindow(QMainWindow):
         self._sc_pull = QShortcut(QKeySequence("Ctrl+Alt+V"), self)
         self._sc_pull.setContext(WindowShortcut)
         self._sc_pull.activated.connect(self._hotkey_pull_clipboard)
-
-        QTimer.singleShot(0, self._place_chrome)
 
     def _hotkey_push_clipboard(self) -> None:
         if self._clip is not None:
@@ -321,19 +333,8 @@ class RemoteClientWindow(QMainWindow):
         else:
             self.showNormal()
             self.btn_fullscreen.setText(i18n.t("viewer_fullscreen"))
-        self._place_chrome()
-
-    def _place_chrome(self) -> None:
-        btn = self.btn_fullscreen
-        btn.adjustSize()
-        margin = 10
-        x = max(margin, self.canvas.width() - btn.width() - margin)
-        btn.move(x, margin)
-        btn.raise_()
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._place_chrome()
+        # Return keyboard focus to the remote surface after chrome clicks.
+        self.canvas.setFocus(MouseFocusReason)
 
     def start(self) -> None:
         self._stop.clear()

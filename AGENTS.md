@@ -11,8 +11,9 @@
 
 - 用 **Python 3.8+** 实现跨平台远程桌面；本分支优先保证 **Ubuntu 18.04** 可运行
 - 角色分离：**Host（被控端）** 抓屏并注入输入；**Client（主控端）** 显示画面并采集键鼠
-- 提供 **向日葵风格设备管理 GUI（Qt）**：本机远控开关、设备列表 CRUD、在线探测、一键远程控制
-- **中英文切换**；Ubuntu 下通过 CJK 字体回退解决中文乱码
+- 提供 **向日葵风格设备管理 GUI（Qt）**：本机远控开关、设备卡片列表 CRUD、在线探测、一键远程控制
+- **中英文切换**与 **主题切换**（浅色/深色/森绿）；Ubuntu 下通过 CJK 字体回退解决中文乱码
+- 提供各平台 **PyInstaller 打包脚本**（`scripts/build_*.sh|ps1`）
 - 优先保证 **流畅性**（低延迟、可丢帧、远程画面防闪烁）与 **稳定性**（心跳、超时、优雅断开、客户端重连）
 - 直连 TCP 模式（Host 监听，Client 连接）；不实现向日葵式公网中继 / NAT 穿透（可后续扩展）
 
@@ -127,12 +128,18 @@ remote/
     client.py               # 主控端
     devices.py              # 设备列表 / 本机设置持久化
     i18n.py                 # 中英文文案
+    themes.py               # 浅色/深色/森绿主题与 QSS
     qt_bind.py              # PySide2/PySide6 兼容层（本分支核心）
     qt_fonts.py             # CJK 字体选择
-    app_gui.py              # Qt 设备管理界面
+    app_gui.py              # Qt 设备管理界面（卡片列表）
     client.py               # Qt 远程画面（防闪烁）
     clipboard_sync.py       # 文字/文件剪贴板同步（Ctrl+Alt+C 推送 / Ctrl+Alt+V 拉取）
+  scripts/build.py          # PyInstaller 跨平台打包入口
+  scripts/build_windows.ps1
+  scripts/build_linux.sh
+  scripts/build_macos.sh
   requirements-ubuntu1804.txt  # 18.04 钉扎依赖
+  requirements-build.txt       # pyinstaller
 ```
 
 ## 4. 协议规范

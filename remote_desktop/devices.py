@@ -65,6 +65,7 @@ class AppSettings:
     scale: float = 1.0
     auto_probe_s: float = 8.0
     language: str = "zh_CN"
+    theme: str = "light"
     # Bump when default stream quality changes so old installs get upgraded once.
     settings_version: int = 2
 
@@ -92,6 +93,9 @@ class DeviceStore:
         lang = str(settings.get("language") or "zh_CN")
         if lang not in {"zh_CN", "en_US"}:
             lang = "zh_CN"
+        theme = str(settings.get("theme") or "light")
+        if theme not in {"light", "dark", "forest"}:
+            theme = "light"
         version = int(settings.get("settings_version") or 0)
         jpeg_quality = int(settings.get("jpeg_quality", 90))
         scale = float(settings.get("scale", 1.0))
@@ -111,6 +115,7 @@ class DeviceStore:
             scale=scale,
             auto_probe_s=float(settings.get("auto_probe_s", 8.0)),
             language=lang,
+            theme=theme,
             settings_version=max(version, 2),
         )
         if not self.settings.host_password:
