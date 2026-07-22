@@ -37,6 +37,7 @@ try:
         QMainWindow,
         QMessageBox,
         QPushButton,
+        QShortcut,
         QSplitter,
         QTableWidget,
         QTableWidgetItem,
@@ -60,6 +61,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QMouseEvent,
         QPainter,
         QPixmap,
+        QShortcut,
         QWheelEvent,
     )
     from PySide6.QtWidgets import (
@@ -208,6 +210,26 @@ SansSerif = _enum(
 PreferDefaultHinting = _enum(
     getattr(QFont, "PreferDefaultHinting", None),
     getattr(getattr(QFont, "HintingPreference", None), "PreferDefaultHinting", None),
+)
+ControlModifier = _enum(
+    getattr(Qt, "ControlModifier", None),
+    getattr(getattr(Qt, "KeyboardModifier", None), "ControlModifier", None),
+)
+AltModifier = _enum(
+    getattr(Qt, "AltModifier", None),
+    getattr(getattr(Qt, "KeyboardModifier", None), "AltModifier", None),
+)
+Key_C = _enum(
+    getattr(Qt, "Key_C", None),
+    getattr(getattr(Qt, "Key", None), "Key_C", None),
+)
+Key_V = _enum(
+    getattr(Qt, "Key_V", None),
+    getattr(getattr(Qt, "Key", None), "Key_V", None),
+)
+WindowShortcut = _enum(
+    getattr(Qt, "WindowShortcut", None),
+    getattr(getattr(Qt, "ShortcutContext", None), "WindowShortcut", None),
 )
 
 KEY_MAP_SRC = [

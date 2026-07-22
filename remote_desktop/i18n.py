@@ -93,7 +93,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "viewer_disconnected": "连接已断开",
         "viewer_auth_failed": "鉴权失败",
         "font_hint": "若中文显示异常，请安装 Noto CJK / 文泉驿字体",
-        "clipboard_ready": "剪贴板同步已启用（文字/文件）",
+        "clipboard_ready": "剪贴板已启用 | Ctrl+Alt+C推送到远程 | Ctrl+Alt+V从远程拉取",
+        "clipboard_push": "正在推送本地剪贴板到远程…",
+        "clipboard_pull": "正在从远程拉取剪贴板…",
     },
     "en_US": {
         "app_title": "LeafLink Remote",
@@ -183,7 +185,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "viewer_disconnected": "Disconnected",
         "viewer_auth_failed": "Authentication failed",
         "font_hint": "If CJK glyphs are missing, install Noto CJK / WenQuanYi fonts",
-        "clipboard_ready": "Clipboard sync enabled (text/files)",
+        "clipboard_ready": "Clipboard on | Ctrl+Alt+C push | Ctrl+Alt+V pull",
+        "clipboard_push": "Pushing local clipboard to remote…",
+        "clipboard_pull": "Pulling clipboard from remote…",
     },
 }
 

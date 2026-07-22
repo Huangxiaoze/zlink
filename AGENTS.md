@@ -131,7 +131,7 @@ remote/
     qt_fonts.py             # CJK 字体选择
     app_gui.py              # Qt 设备管理界面
     client.py               # Qt 远程画面（防闪烁）
-    clipboard_sync.py       # 文字/文件剪贴板同步
+    clipboard_sync.py       # 文字/文件剪贴板同步（Ctrl+Alt+C 推送 / Ctrl+Alt+V 拉取）
   requirements-ubuntu1804.txt  # 18.04 钉扎依赖
 ```
 

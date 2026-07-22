@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import tempfile
@@ -36,12 +37,16 @@ def clipboard_temp_dir() -> Path:
 
 def _safe_name(name: str) -> str:
     base = os.path.basename(name.replace("\\", "/")).strip() or "file.bin"
-    # Prevent weird names on Windows/Linux.
     return "".join(ch if ch not in '<>:"|?*' else "_" for ch in base)[:180]
 
 
+def _text_sig(text: str) -> str:
+    digest = hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return "text:%d:%s" % (len(text), digest)
+
+
 class ClipboardBridge(QObject):
-    """Main-thread clipboard poller + remote applier (text and local files)."""
+    """Main-thread clipboard sync (text + local files)."""
 
     status = Signal(str)
 
@@ -51,7 +56,7 @@ class ClipboardBridge(QObject):
         parent: Optional[QObject] = None,
         *,
         enabled_check: Optional[Callable[[], bool]] = None,
-        poll_ms: int = 500,
+        poll_ms: int = 400,
     ) -> None:
         super().__init__(parent)
         self._send_packet = send_packet
@@ -63,6 +68,7 @@ class ClipboardBridge(QObject):
         self._incoming: dict[str, dict] = {}
         self._recent_files: list[str] = []
         self._lock = threading.Lock()
+        self._connected_data_changed = False
 
         self._timer = QTimer(self)
         self._timer.setInterval(poll_ms)
@@ -71,9 +77,39 @@ class ClipboardBridge(QObject):
     def start(self) -> None:
         self._capture_signature(seed=True)
         self._timer.start()
+        cb = self._app_clipboard()
+        if cb is not None and not self._connected_data_changed:
+            cb.dataChanged.connect(self._on_data_changed)
+            self._connected_data_changed = True
 
     def stop(self) -> None:
         self._timer.stop()
+        cb = self._app_clipboard()
+        if cb is not None and self._connected_data_changed:
+            try:
+                cb.dataChanged.disconnect(self._on_data_changed)
+            except (RuntimeError, TypeError):
+                pass
+            self._connected_data_changed = False
+
+    def push_now(self) -> bool:
+        """Force push current local clipboard to remote (ignores last-signature)."""
+        if not self._enabled():
+            self.status.emit("clipboard sync idle (no session)")
+            return False
+        self._last_sig = ""
+        self._suppress_until = 0.0
+        self._poll_local(force=True)
+        return True
+
+    def request_remote(self) -> None:
+        """Ask peer to push its clipboard now."""
+        if not self._enabled():
+            self.status.emit("clipboard sync idle (no session)")
+            return
+        packet = pack_clipboard_message({"kind": "request"}, b"")
+        self._send_packet(packet)
+        self.status.emit("requested remote clipboard")
 
     def handle_remote_payload(self, payload: bytes) -> None:
         try:
@@ -86,8 +122,15 @@ class ClipboardBridge(QObject):
             self._apply_text(blob.decode("utf-8", errors="replace"))
         elif kind == "file":
             self._apply_file_chunk(meta, blob)
+        elif kind == "request":
+            # Peer asked us to push — do it on the GUI thread timer.
+            QTimer.singleShot(0, self.push_now)
         else:
             log.debug("ignore clipboard kind=%s", kind)
+
+    def _on_data_changed(self) -> None:
+        # Clipboard changed by any app — sync ASAP.
+        QTimer.singleShot(0, self._poll_local)
 
     def _app_clipboard(self) -> Optional[QClipboard]:
         app = QApplication.instance()
@@ -103,52 +146,75 @@ class ClipboardBridge(QObject):
         except Exception:
             return False
 
-    def _capture_signature(self, seed: bool = False) -> str:
+    def _clip_mode(self):
+        return getattr(QClipboard, "Clipboard", None)
+
+    def _mime(self):
         cb = self._app_clipboard()
         if cb is None:
-            return ""
-        md = cb.mimeData()
-        if md is None:
+            return None, None
+        mode = self._clip_mode()
+        if mode is not None:
+            try:
+                return cb, cb.mimeData(mode)
+            except TypeError:
+                pass
+        return cb, cb.mimeData()
+
+    def _capture_signature(self, seed: bool = False) -> str:
+        cb, md = self._mime()
+        if cb is None or md is None:
             sig = "empty"
         elif md.hasUrls():
             paths = []
             for url in md.urls():
                 if url.isLocalFile():
-                    paths.append(url.toLocalFile())
-            sig = "files:" + "|".join(paths)
+                    p = url.toLocalFile()
+                    if p:
+                        paths.append(p)
+            sig = "files:" + "|".join(paths) if paths else "empty"
         elif md.hasText():
             text = md.text() or ""
-            sig = "text:%d:%s" % (len(text), hash(text))
+            sig = _text_sig(text) if text else "empty"
         else:
             sig = "other"
         if seed:
             self._last_sig = sig
         return sig
 
-    def _poll_local(self) -> None:
+    def _poll_local(self, force: bool = False) -> None:
         if not self._enabled() or self._sending:
             return
         now = time.monotonic()
-        if now < self._suppress_until:
+        if not force and now < self._suppress_until:
             self._last_sig = self._capture_signature()
             return
         sig = self._capture_signature()
-        if not sig or sig == self._last_sig or sig == self._suppress_sig:
+        if not force:
+            if not sig or sig == "empty" or sig == "other":
+                return
+            if sig == self._last_sig or sig == self._suppress_sig:
+                return
+        elif sig in {"", "empty", "other"}:
+            self.status.emit("local clipboard empty")
             return
         self._last_sig = sig
         try:
             self._sending = True
             if sig.startswith("files:"):
                 paths = [p for p in sig[6:].split("|") if p]
-                self._send_files(paths)
+                if paths:
+                    self._send_files(paths)
             elif sig.startswith("text:"):
-                cb = self._app_clipboard()
-                if cb is None:
+                cb, md = self._mime()
+                if cb is None or md is None:
                     return
-                text = cb.text() or ""
-                self._send_text(text)
+                text = md.text() or ""
+                if text:
+                    self._send_text(text)
         except Exception:
             log.exception("clipboard send failed")
+            self.status.emit("clipboard send failed")
         finally:
             self._sending = False
 
@@ -160,7 +226,8 @@ class ClipboardBridge(QObject):
             return
         packet = pack_clipboard_message({"kind": "text"}, raw)
         self._send_packet(packet)
-        self.status.emit("clipboard text synced")
+        log.info("clipboard text sent (%d bytes)", len(raw))
+        self.status.emit("clipboard text synced (%d bytes)" % len(raw))
 
     def _send_files(self, paths: list[str]) -> None:
         sent = 0
@@ -179,9 +246,7 @@ class ClipboardBridge(QObject):
             with path.open("rb") as fh:
                 while True:
                     chunk = fh.read(CHUNK_SIZE)
-                    done = not chunk or (offset + len(chunk) >= size)
                     if not chunk and offset == 0:
-                        # empty file
                         packet = pack_clipboard_message(
                             {
                                 "kind": "file",
@@ -194,9 +259,11 @@ class ClipboardBridge(QObject):
                             b"",
                         )
                         self._send_packet(packet)
+                        sent += 1
                         break
                     if not chunk:
                         break
+                    done = offset + len(chunk) >= size
                     packet = pack_clipboard_message(
                         {
                             "kind": "file",
@@ -211,20 +278,29 @@ class ClipboardBridge(QObject):
                     self._send_packet(packet)
                     offset += len(chunk)
                     if done:
+                        sent += 1
                         break
-            sent += 1
         if sent:
+            log.info("clipboard files sent: %d", sent)
             self.status.emit("clipboard files synced (%d)" % sent)
 
     def _apply_text(self, text: str) -> None:
         cb = self._app_clipboard()
         if cb is None:
             return
-        self._suppress_sig = "text:%d:%s" % (len(text), hash(text))
-        self._suppress_until = time.monotonic() + 1.5
-        cb.setText(text)
+        self._suppress_sig = _text_sig(text)
+        self._suppress_until = time.monotonic() + 2.0
+        mode = self._clip_mode()
+        if mode is not None:
+            try:
+                cb.setText(text, mode)
+            except TypeError:
+                cb.setText(text)
+        else:
+            cb.setText(text)
         self._last_sig = self._suppress_sig
-        self.status.emit("remote text pasted to clipboard")
+        log.info("clipboard text applied (%d chars)", len(text))
+        self.status.emit("remote text -> local clipboard")
 
     def _apply_file_chunk(self, meta: dict, blob: bytes) -> None:
         file_id = str(meta.get("id") or "")
@@ -248,7 +324,12 @@ class ClipboardBridge(QObject):
                 self._incoming[file_id] = state
             fh = state["fh"]
             if offset != state["received"]:
-                log.warning("clipboard file offset mismatch id=%s", file_id)
+                log.warning(
+                    "clipboard file offset mismatch id=%s expect=%s got=%s",
+                    file_id,
+                    state["received"],
+                    offset,
+                )
             fh.write(blob)
             state["received"] = offset + len(blob)
             if done or state["received"] >= size:
@@ -258,21 +339,25 @@ class ClipboardBridge(QObject):
                 self._recent_files.append(str(path))
                 self._recent_files = self._recent_files[-MAX_FILES_PER_SYNC:]
                 self._set_files_clipboard(list(self._recent_files))
-                self.status.emit("remote file ready: %s" % name)
+                self.status.emit("remote file -> clipboard: %s" % name)
 
     def _set_files_clipboard(self, paths: list[str]) -> None:
         cb = self._app_clipboard()
         if cb is None:
             return
         md = QMimeData()
-        urls = []
-        for p in paths:
-            urls.append(QUrl.fromLocalFile(p))
+        urls = [QUrl.fromLocalFile(p) for p in paths]
         md.setUrls(urls)
-        # Also set text path for apps that only accept text.
         md.setText("\n".join(paths))
         sig = "files:" + "|".join(paths)
         self._suppress_sig = sig
-        self._suppress_until = time.monotonic() + 2.0
-        cb.setMimeData(md)
+        self._suppress_until = time.monotonic() + 2.5
+        mode = self._clip_mode()
+        if mode is not None:
+            try:
+                cb.setMimeData(md, mode)
+            except TypeError:
+                cb.setMimeData(md)
+        else:
+            cb.setMimeData(md)
         self._last_sig = sig

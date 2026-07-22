@@ -12,9 +12,13 @@ from .i18n import i18n
 from .net import Connection, connect_to
 from .protocol import MsgType, ProtocolError, decode_json, unpack_frame_message
 from .qt_bind import (
+    AltModifier,
+    ControlModifier,
     FastTransformation,
     Format_RGB32,
     KeepAspectRatio,
+    Key_C,
+    Key_V,
     MiddleButton,
     MouseFocusReason,
     QApplication,
@@ -27,6 +31,7 @@ from .qt_bind import (
     QObject,
     QPainter,
     QPixmap,
+    QShortcut,
     QTimer,
     QVBoxLayout,
     QWheelEvent,
@@ -39,6 +44,7 @@ from .qt_bind import (
     WA_NoSystemBackground,
     WA_OpaquePaintEvent,
     WA_TransparentForMouseEvents,
+    WindowShortcut,
     black,
     event_pos,
     qt_key_constants,
@@ -151,11 +157,20 @@ class RemoteCanvas(QWidget):
         super().wheelEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        # Clipboard hotkeys are handled by the parent window; don't inject them.
+        mods = event.modifiers()
+        if (mods & ControlModifier) and (mods & AltModifier) and event.key() in {Key_C, Key_V}:
+            event.ignore()
+            return
         if not event.isAutoRepeat() and self.on_key:
             self.on_key("down", _qt_key_name(event))
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        mods = event.modifiers()
+        if (mods & ControlModifier) and (mods & AltModifier) and event.key() in {Key_C, Key_V}:
+            event.ignore()
+            return
         if not event.isAutoRepeat() and self.on_key:
             self.on_key("up", _qt_key_name(event))
         super().keyReleaseEvent(event)
@@ -216,6 +231,24 @@ class RemoteClientWindow(QMainWindow):
         self._present_timer.setInterval(16)
         self._present_timer.timeout.connect(self._present_pending)
         self._present_timer.start()
+
+        # Explicit clipboard hotkeys (normal Ctrl+C/V are injected to remote OS).
+        self._sc_push = QShortcut(QKeySequence("Ctrl+Alt+C"), self)
+        self._sc_push.setContext(WindowShortcut)
+        self._sc_push.activated.connect(self._hotkey_push_clipboard)
+        self._sc_pull = QShortcut(QKeySequence("Ctrl+Alt+V"), self)
+        self._sc_pull.setContext(WindowShortcut)
+        self._sc_pull.activated.connect(self._hotkey_pull_clipboard)
+
+    def _hotkey_push_clipboard(self) -> None:
+        if self._clip is not None:
+            self._clip.push_now()
+            self._on_status(i18n.t("clipboard_push"))
+
+    def _hotkey_pull_clipboard(self) -> None:
+        if self._clip is not None:
+            self._clip.request_remote()
+            self._on_status(i18n.t("clipboard_pull"))
 
     def start(self) -> None:
         self._stop.clear()
