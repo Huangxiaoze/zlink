@@ -344,9 +344,9 @@ class RemoteHost:
                 log.debug("ignore msg %s in terminal session", frame.type)
 
     def _send_loop(self, conn: Connection, session_stop: threading.Event) -> None:
-        pending_bytes = 0
         last_adapt = time.monotonic()
         send_failures = 0
+        ok_streak = 0
         while not session_stop.is_set() and not self._stop.is_set():
             if not self._flush_reliable_out(conn, session_stop, self.clipboard_out):
                 session_stop.set()
@@ -380,50 +380,49 @@ class RemoteHost:
             )
             if not conn.try_send_raw(packet):
                 send_failures += 1
+                ok_streak = 0
                 if conn.closed or send_failures >= 8:
                     session_stop.set()
                     break
+                # Only degrade when the socket is actually back-pressured.
+                # Do NOT use frame byte size: LAN HD JPEGs are often >1MB and
+                # size-based adapt was crushing sharpness on gigabit links.
                 self._apply_quality(
                     {
                         "max_fps": max(10.0, self.stream.max_fps - 5),
-                        "jpeg_quality": max(self.stream.min_jpeg_quality, self.stream.jpeg_quality - 8),
+                        "jpeg_quality": max(
+                            self.stream.min_jpeg_quality, self.stream.jpeg_quality - 8
+                        ),
                         "scale": max(self.stream.min_scale, self.stream.scale - 0.1),
                     }
                 )
                 session_stop.wait(0.01)
                 continue
             send_failures = 0
-            pending_bytes = len(packet)
+            ok_streak += 1
 
+            # Recover toward the client's requested quality after a healthy streak.
             now = time.monotonic()
-            if now - last_adapt > 1.2:
+            if now - last_adapt > 1.2 and ok_streak >= 8:
                 last_adapt = now
                 target_q = self.config.stream.jpeg_quality
                 target_scale = self.config.stream.scale
-                if pending_bytes > 350_000:
-                    next_q = max(self.stream.min_jpeg_quality, self.stream.jpeg_quality - 4)
-                    next_scale = self.stream.scale
-                    if self.stream.jpeg_quality <= self.stream.min_jpeg_quality + 2:
-                        next_scale = max(self.stream.min_scale, self.stream.scale - 0.05)
-                    if next_q != self.stream.jpeg_quality or next_scale != self.stream.scale:
-                        self._apply_quality(
-                            {
-                                "max_fps": self.stream.max_fps,
-                                "jpeg_quality": next_q,
-                                "scale": next_scale,
-                            }
-                        )
-                elif pending_bytes < 120_000:
-                    next_q = min(target_q, self.stream.jpeg_quality + 4)
-                    next_scale = min(target_scale, self.stream.scale + 0.05)
-                    if next_q != self.stream.jpeg_quality or next_scale != self.stream.scale:
-                        self._apply_quality(
-                            {
-                                "max_fps": self.stream.max_fps,
-                                "jpeg_quality": next_q,
-                                "scale": next_scale,
-                            }
-                        )
+                target_fps = self.config.stream.max_fps
+                next_q = min(target_q, self.stream.jpeg_quality + 4)
+                next_scale = min(target_scale, self.stream.scale + 0.05)
+                next_fps = min(target_fps, self.stream.max_fps + 5)
+                if (
+                    next_q != self.stream.jpeg_quality
+                    or next_scale != self.stream.scale
+                    or next_fps != self.stream.max_fps
+                ):
+                    self._apply_quality(
+                        {
+                            "max_fps": next_fps,
+                            "jpeg_quality": next_q,
+                            "scale": next_scale,
+                        }
+                    )
 
     def _watchdog_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         timeout = self.config.net.heartbeat_timeout_s

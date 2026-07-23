@@ -39,11 +39,13 @@ def encode_bgra(
 
     buf = io.BytesIO()
     # subsampling=0 => 4:4:4, much clearer for text than default 4:2:0.
+    # qtables keep defaults; high quality + 4:4:4 is the LAN sharpness path.
     image.save(
         buf,
         format="JPEG",
         quality=int(quality),
         optimize=False,
+        progressive=False,
         subsampling=0,
     )
     return EncodedFrame(

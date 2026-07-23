@@ -437,7 +437,7 @@ class SettingsDialog(QDialog):
 
     def _apply_hd(self) -> None:
         self.fps.setText("30")
-        self.quality.setText("90")
+        self.quality.setText("95")
         self.scale.setText("1.0")
 
     def _save(self) -> None:
@@ -448,7 +448,7 @@ class SettingsDialog(QDialog):
             self.store.settings.auto_probe_s = max(3.0, float(self.probe.text()))
             self.store.settings.language = str(self.lang.currentData())
             self.store.settings.theme = str(self.theme.currentData() or DEFAULT_THEME)
-            self.store.settings.settings_version = 2
+            self.store.settings.settings_version = 3
         except ValueError:
             show_warning(self, title=i18n.t("tip"), message=i18n.t("invalid_number"))
             return

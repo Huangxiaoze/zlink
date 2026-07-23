@@ -121,13 +121,13 @@ class AppSettings:
     local_name: str = ""
     device_code: str = ""
     max_fps: float = 30.0
-    jpeg_quality: int = 90
+    jpeg_quality: int = 95
     scale: float = 1.0
     auto_probe_s: float = 8.0
     language: str = "zh_CN"
     theme: str = "light"
     # Bump when default stream quality changes so old installs get upgraded once.
-    settings_version: int = 2
+    settings_version: int = 3
 
 
 class DeviceStore:
@@ -159,30 +159,36 @@ class DeviceStore:
         if theme not in set(theme_ids()):
             theme = DEFAULT_THEME
         version = int(settings.get("settings_version") or 0)
-        jpeg_quality = int(settings.get("jpeg_quality", 90))
+        jpeg_quality = int(settings.get("jpeg_quality", 95))
         scale = float(settings.get("scale", 1.0))
+        max_fps = float(settings.get("max_fps", 30.0))
         # Migrate old soft defaults (0.75 / q60) to HD once.
         if version < 2 and jpeg_quality <= 70 and scale <= 0.85:
             jpeg_quality = 90
             scale = 1.0
             version = 2
+        # v3: stop under-serving LAN — raise quality floor for prior HD defaults.
+        if version < 3 and jpeg_quality <= 90 and scale >= 0.99:
+            jpeg_quality = 95
+            scale = 1.0
+            version = 3
         self.settings = AppSettings(
             host_bind=str(settings.get("host_bind", "0.0.0.0")),
             host_port=DEFAULT_PORT,
             host_password=str(settings.get("host_password", "")),
             local_name=str(settings.get("local_name") or socket.gethostname()),
             device_code=str(settings.get("device_code") or _make_device_code()),
-            max_fps=float(settings.get("max_fps", 30.0)),
+            max_fps=max_fps,
             jpeg_quality=jpeg_quality,
             scale=scale,
             auto_probe_s=float(settings.get("auto_probe_s", 8.0)),
             language=lang,
             theme=theme,
-            settings_version=max(version, 2),
+            settings_version=max(version, 3),
         )
         if not self.settings.host_password:
             self.settings.host_password = _make_verify_code()
-        if int(settings.get("settings_version") or 0) < 2:
+        if int(settings.get("settings_version") or 0) < 3:
             self.save()
         self.devices = []
         for item in raw.get("devices") or []:

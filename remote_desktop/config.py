@@ -10,10 +10,10 @@ DEFAULT_PORT = 5959
 class StreamConfig:
     # HD defaults: full resolution + high JPEG quality for sharp remote view.
     max_fps: float = 30.0
-    jpeg_quality: int = 90
+    jpeg_quality: int = 95
     scale: float = 1.0
     min_jpeg_quality: int = 55
-    max_jpeg_quality: int = 95
+    max_jpeg_quality: int = 98
     min_scale: float = 0.6
     max_scale: float = 1.0
 
