@@ -16,7 +16,6 @@ from .qt_bind import (
     HoverEnter,
     HoverLeave,
     LeftButton,
-    MouseButtonDblClick,
     MouseButtonPress,
     MouseButtonRelease,
     MouseMove,
@@ -46,7 +45,6 @@ from .qt_bind import (
     Signal,
     WA_DeleteOnClose,
     WA_Hover,
-    WindowStateChange,
     dialog_exec,
     make_dialog_button_box,
     menu_exec,
@@ -127,9 +125,6 @@ class _WindowDragFilter(QObject):
         if qt_enum_eq(et, MouseButtonRelease):
             self._drag_offset = None
             return False
-        if qt_enum_eq(et, MouseButtonDblClick) and qt_enum_eq(event.button(), LeftButton):
-            self._host._toggle_win_max()
-            return True
         return False
 
 
@@ -651,21 +646,22 @@ class MainWindow(QMainWindow):
         header.addWidget(self.btn_quick)
         header.addWidget(self.btn_settings)
 
-        self.btn_win_max = QPushButton("□")
-        self.btn_win_max.setObjectName("windowChromeBtn")
-        self.btn_win_max.setFocusPolicy(NoFocus)
-        self.btn_win_max.setCursor(PointingHandCursor)
-        self.btn_win_max.setFixedSize(32, 28)
-        self.btn_win_max.clicked.connect(self._toggle_win_max)
+        self.btn_win_min = QPushButton("–")
+        self.btn_win_min.setObjectName("windowChromeBtn")
+        self.btn_win_min.setFocusPolicy(NoFocus)
+        self.btn_win_min.setCursor(PointingHandCursor)
+        self.btn_win_min.setFixedSize(32, 28)
+        self.btn_win_min.setToolTip(i18n.t("window_minimize"))
+        self.btn_win_min.clicked.connect(self.showMinimized)
         self.btn_win_close = QPushButton("×")
         self.btn_win_close.setObjectName("windowChromeBtn")
         self.btn_win_close.setFocusPolicy(NoFocus)
         self.btn_win_close.setCursor(PointingHandCursor)
         self.btn_win_close.setFixedSize(32, 28)
+        self.btn_win_close.setToolTip(i18n.t("close_action"))
         self.btn_win_close.clicked.connect(self.close)
-        header.addWidget(self.btn_win_max, 0)
+        header.addWidget(self.btn_win_min, 0)
         header.addWidget(self.btn_win_close, 0)
-        self._sync_win_max_btn()
 
         search_row = QHBoxLayout()
         self.lbl_search = QLabel()
@@ -753,35 +749,14 @@ class MainWindow(QMainWindow):
         if app is not None:
             app.setQuitOnLastWindowClosed(False)
 
-    def _toggle_win_max(self) -> None:
-        if self.isMaximized():
-            self.showNormal()
-        else:
-            self.showMaximized()
-        self._sync_win_max_btn()
-
-    def _sync_win_max_btn(self) -> None:
-        btn = getattr(self, "btn_win_max", None)
-        if btn is None:
-            return
-        if self.isMaximized():
-            btn.setText("❐")
-            btn.setToolTip(i18n.t("window_restore"))
-        else:
-            btn.setText("□")
-            btn.setToolTip(i18n.t("window_maximize"))
+    def retranslate(self) -> None:
+        self.setWindowTitle(i18n.t("app_title"))
+        min_btn = getattr(self, "btn_win_min", None)
+        if min_btn is not None:
+            min_btn.setToolTip(i18n.t("window_minimize"))
         close_btn = getattr(self, "btn_win_close", None)
         if close_btn is not None:
             close_btn.setToolTip(i18n.t("close_action"))
-
-    def changeEvent(self, event) -> None:  # noqa: N802
-        super().changeEvent(event)
-        if WindowStateChange is not None and qt_enum_eq(event.type(), WindowStateChange):
-            self._sync_win_max_btn()
-
-    def retranslate(self) -> None:
-        self.setWindowTitle(i18n.t("app_title"))
-        self._sync_win_max_btn()
         if self._tray is not None:
             self._tray.retranslate()
         self.lbl_brand.setText(i18n.t("brand"))
