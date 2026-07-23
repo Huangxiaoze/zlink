@@ -71,6 +71,9 @@ from .qt_fonts import apply_app_font, ensure_utf8_stdio
 from .app_icon import apply_app_icon
 from .confirm_dialog import (
     DialogDragBar,
+    ICON_CLOSE,
+    ICON_MINIMIZE,
+    WindowChromeButton,
     ask_confirm,
     ask_quick_connect,
     make_frameless_dialog,
@@ -646,18 +649,14 @@ class MainWindow(QMainWindow):
         header.addWidget(self.btn_quick)
         header.addWidget(self.btn_settings)
 
-        self.btn_win_min = QPushButton("–")
-        self.btn_win_min.setObjectName("windowChromeBtn")
-        self.btn_win_min.setFocusPolicy(NoFocus)
-        self.btn_win_min.setCursor(PointingHandCursor)
-        self.btn_win_min.setFixedSize(32, 28)
+        self.btn_win_min = WindowChromeButton(
+            ICON_MINIMIZE, self, object_name="windowChromeBtn", width=32, height=28
+        )
         self.btn_win_min.setToolTip(i18n.t("window_minimize"))
         self.btn_win_min.clicked.connect(self.showMinimized)
-        self.btn_win_close = QPushButton("×")
-        self.btn_win_close.setObjectName("windowChromeBtn")
-        self.btn_win_close.setFocusPolicy(NoFocus)
-        self.btn_win_close.setCursor(PointingHandCursor)
-        self.btn_win_close.setFixedSize(32, 28)
+        self.btn_win_close = WindowChromeButton(
+            ICON_CLOSE, self, object_name="windowChromeBtn", width=32, height=28
+        )
         self.btn_win_close.setToolTip(i18n.t("close_action"))
         self.btn_win_close.clicked.connect(self.close)
         header.addWidget(self.btn_win_min, 0)

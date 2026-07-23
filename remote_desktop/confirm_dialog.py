@@ -6,19 +6,23 @@ from typing import Callable, Optional, Tuple
 
 from .i18n import i18n
 from .qt_bind import (
+    Antialiasing,
     DialogAccepted,
     DialogWindow,
     FramelessWindowHint,
     LeftButton,
     NoFocus,
+    NoPen,
     Password,
     PointingHandCursor,
     QCheckBox,
+    QColor,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPainter,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -29,7 +33,17 @@ from .qt_bind import (
     qt_enum_eq,
     qt_has_flag,
 )
+from .themes import CURRENT
 from .toggle_switch import ToggleSwitch
+
+
+# Drawn window-control glyphs (avoid relying on font glyphs).
+ICON_MINIMIZE = "minimize"
+ICON_MAXIMIZE = "maximize"
+ICON_RESTORE = "restore"
+ICON_CLOSE = "close"
+ICON_FULLSCREEN = "fullscreen"
+ICON_EXIT_FULLSCREEN = "exit_fullscreen"
 
 
 def _polish(*widgets: QWidget) -> None:
@@ -44,6 +58,120 @@ def _global_pos(event):
     if hasattr(event, "globalPosition"):
         return event.globalPosition().toPoint()
     return event.globalPos()
+
+
+def _bar(painter: QPainter, x: float, y: float, w: float, h: float) -> None:
+    painter.drawRoundedRect(x, y, w, h, 0.7, 0.7)
+
+
+def _draw_chrome_icon(painter: QPainter, kind: str, cx: float, cy: float, color: QColor) -> None:
+    painter.setPen(NoPen)
+    painter.setBrush(color)
+    t = 1.8
+
+    if kind == ICON_MINIMIZE:
+        _bar(painter, cx - 5.5, cy - t * 0.5, 11.0, t)
+        return
+
+    if kind == ICON_MAXIMIZE:
+        left, top, size = cx - 5.0, cy - 5.0, 10.0
+        _bar(painter, left, top, size, t)
+        _bar(painter, left, top + size - t, size, t)
+        _bar(painter, left, top, t, size)
+        _bar(painter, left + size - t, top, t, size)
+        return
+
+    if kind == ICON_RESTORE:
+        # Back square
+        _bar(painter, cx - 2.0, cy - 5.5, 8.0, t)
+        _bar(painter, cx - 2.0 + 8.0 - t, cy - 5.5, t, 8.0)
+        _bar(painter, cx - 2.0, cy - 5.5, t, 3.0)
+        _bar(painter, cx - 2.0 + 5.0, cy - 5.5 + 8.0 - t, 3.0, t)
+        # Front square
+        left, top, size = cx - 5.5, cy - 2.5, 8.0
+        _bar(painter, left, top, size, t)
+        _bar(painter, left, top + size - t, size, t)
+        _bar(painter, left, top, t, size)
+        _bar(painter, left + size - t, top, t, size)
+        return
+
+    if kind == ICON_CLOSE:
+        painter.save()
+        painter.translate(cx, cy)
+        painter.rotate(45)
+        _bar(painter, -5.5, -t * 0.5, 11.0, t)
+        painter.rotate(90)
+        _bar(painter, -5.5, -t * 0.5, 11.0, t)
+        painter.restore()
+        return
+
+    if kind in (ICON_FULLSCREEN, ICON_EXIT_FULLSCREEN):
+        box = 11.0
+        arm = 4.2
+        left = cx - box * 0.5
+        right = cx + box * 0.5
+        top = cy - box * 0.5
+        bottom = cy + box * 0.5
+        if kind == ICON_FULLSCREEN:
+            # Corners at outer edges (expand).
+            _bar(painter, left, top, arm, t)
+            _bar(painter, left, top, t, arm)
+            _bar(painter, right - arm, top, arm, t)
+            _bar(painter, right - t, top, t, arm)
+            _bar(painter, left, bottom - t, arm, t)
+            _bar(painter, left, bottom - arm, t, arm)
+            _bar(painter, right - arm, bottom - t, arm, t)
+            _bar(painter, right - t, bottom - arm, t, arm)
+        else:
+            # Corners pulled inward (collapse).
+            inset = 2.2
+            _bar(painter, left + inset, top + inset, arm, t)
+            _bar(painter, left + inset, top + inset, t, arm)
+            _bar(painter, right - inset - arm, top + inset, arm, t)
+            _bar(painter, right - inset - t, top + inset, t, arm)
+            _bar(painter, left + inset, bottom - inset - t, arm, t)
+            _bar(painter, left + inset, bottom - inset - arm, t, arm)
+            _bar(painter, right - inset - arm, bottom - inset - t, arm, t)
+            _bar(painter, right - inset - t, bottom - inset - arm, t, arm)
+        return
+
+
+class WindowChromeButton(QPushButton):
+    """Caption control that paints a vector icon instead of a font glyph."""
+
+    def __init__(
+        self,
+        kind: str,
+        parent: Optional[QWidget] = None,
+        *,
+        object_name: str = "dialogClose",
+        width: int = 32,
+        height: int = 28,
+    ) -> None:
+        super().__init__(parent)
+        self._kind = kind
+        self.setObjectName(object_name)
+        self.setText("")
+        self.setCursor(PointingHandCursor)
+        self.setFocusPolicy(NoFocus)
+        self.setFixedSize(int(width), int(height))
+
+    @property
+    def kind(self) -> str:
+        return self._kind
+
+    def set_kind(self, kind: str) -> None:
+        if kind == self._kind:
+            return
+        self._kind = kind
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(Antialiasing, True)
+        ink = QColor(CURRENT.text if self.underMouse() else CURRENT.muted)
+        _draw_chrome_icon(painter, self._kind, self.width() * 0.5, self.height() * 0.5, ink)
 
 
 def _make_frameless(
@@ -110,45 +238,31 @@ class _DragBar(QFrame):
         self.lbl_title.setObjectName("dialogCaption")
         row.addWidget(self.lbl_title, 1)
 
-        self.btn_fullscreen: QPushButton | None = None
-        self.btn_min: QPushButton | None = None
-        self.btn_max: QPushButton | None = None
+        self.btn_fullscreen: WindowChromeButton | None = None
+        self.btn_min: WindowChromeButton | None = None
+        self.btn_max: WindowChromeButton | None = None
         if self._on_fullscreen is not None:
-            self.btn_fullscreen = QPushButton("▣")
-            self.btn_fullscreen.setObjectName("dialogClose")
-            self.btn_fullscreen.setCursor(PointingHandCursor)
-            self.btn_fullscreen.setFocusPolicy(NoFocus)
-            self.btn_fullscreen.setFixedSize(btn_w, btn_h)
+            self.btn_fullscreen = WindowChromeButton(
+                ICON_FULLSCREEN, self, width=btn_w, height=btn_h
+            )
             self.btn_fullscreen.clicked.connect(self._on_fullscreen)
             row.addWidget(self.btn_fullscreen, 0)
             self.sync_fullscreen_btn(False)
 
         if self._window_controls:
-            self.btn_min = QPushButton("–")
-            self.btn_min.setObjectName("dialogClose")
+            self.btn_min = WindowChromeButton(ICON_MINIMIZE, self, width=btn_w, height=btn_h)
             self.btn_min.setToolTip(i18n.t("window_minimize"))
-            self.btn_min.setCursor(PointingHandCursor)
-            self.btn_min.setFocusPolicy(NoFocus)
-            self.btn_min.setFixedSize(btn_w, btn_h)
             self.btn_min.clicked.connect(host.showMinimized)
             row.addWidget(self.btn_min, 0)
 
             if self._show_maximize:
-                self.btn_max = QPushButton("□")
-                self.btn_max.setObjectName("dialogClose")
+                self.btn_max = WindowChromeButton(ICON_MAXIMIZE, self, width=btn_w, height=btn_h)
                 self.btn_max.setToolTip(i18n.t("window_maximize"))
-                self.btn_max.setCursor(PointingHandCursor)
-                self.btn_max.setFocusPolicy(NoFocus)
-                self.btn_max.setFixedSize(btn_w, btn_h)
                 self.btn_max.clicked.connect(self._toggle_max)
                 row.addWidget(self.btn_max, 0)
 
-        btn_close = QPushButton("×")
-        btn_close.setObjectName("dialogClose")
+        btn_close = WindowChromeButton(ICON_CLOSE, self, width=btn_w, height=btn_h)
         btn_close.setToolTip(i18n.t("close_action"))
-        btn_close.setCursor(PointingHandCursor)
-        btn_close.setFocusPolicy(NoFocus)
-        btn_close.setFixedSize(btn_w, btn_h)
         # QDialog → reject(); QMainWindow / other top-levels → close().
         if isinstance(host, QDialog):
             btn_close.clicked.connect(host.reject)
@@ -161,11 +275,10 @@ class _DragBar(QFrame):
         if self.btn_fullscreen is None:
             return
         if fullscreen:
-            # BMP glyphs — avoid emoji-plane symbols missing on Ubuntu 18.04 fonts.
-            self.btn_fullscreen.setText("↙")
+            self.btn_fullscreen.set_kind(ICON_EXIT_FULLSCREEN)
             self.btn_fullscreen.setToolTip(i18n.t("viewer_exit_fullscreen"))
         else:
-            self.btn_fullscreen.setText("▣")
+            self.btn_fullscreen.set_kind(ICON_FULLSCREEN)
             self.btn_fullscreen.setToolTip(i18n.t("viewer_fullscreen"))
 
     def _toggle_max(self) -> None:
@@ -179,10 +292,10 @@ class _DragBar(QFrame):
         if self.btn_max is None:
             return
         if self._host.isMaximized():
-            self.btn_max.setText("❐")
+            self.btn_max.set_kind(ICON_RESTORE)
             self.btn_max.setToolTip(i18n.t("window_restore"))
         else:
-            self.btn_max.setText("□")
+            self.btn_max.set_kind(ICON_MAXIMIZE)
             self.btn_max.setToolTip(i18n.t("window_maximize"))
 
     def enterEvent(self, event) -> None:  # noqa: N802
@@ -590,3 +703,4 @@ def ask_quick_connect(
 # Public aliases for other form dialogs (settings / device editor).
 make_frameless_dialog = _make_frameless
 DialogDragBar = _DragBar
+# WindowChromeButton / ICON_* are public (used by main window chrome).
