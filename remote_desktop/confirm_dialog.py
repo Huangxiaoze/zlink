@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from .i18n import i18n
 from .qt_bind import (
@@ -77,12 +77,14 @@ class _DragBar(QFrame):
         *,
         window_controls: bool = False,
         compact: bool = False,
+        on_fullscreen: Optional[Callable[[], None]] = None,
     ) -> None:
         super().__init__(host)
         self._host = host
         self._drag_offset = None
         self._window_controls = bool(window_controls)
         self._compact = bool(compact)
+        self._on_fullscreen = on_fullscreen
         self.setObjectName("dialogTitleBar")
         self.setAttribute(WA_StyledBackground, True)
         # Keep kind/danger for callers; accent stripe was removed as visual noise.
@@ -104,8 +106,19 @@ class _DragBar(QFrame):
         self.lbl_title.setObjectName("dialogCaption")
         row.addWidget(self.lbl_title, 1)
 
+        self.btn_fullscreen: QPushButton | None = None
         self.btn_min: QPushButton | None = None
         self.btn_max: QPushButton | None = None
+        if self._on_fullscreen is not None:
+            self.btn_fullscreen = QPushButton("▣")
+            self.btn_fullscreen.setObjectName("dialogClose")
+            self.btn_fullscreen.setCursor(PointingHandCursor)
+            self.btn_fullscreen.setFocusPolicy(NoFocus)
+            self.btn_fullscreen.setFixedSize(btn_w, btn_h)
+            self.btn_fullscreen.clicked.connect(self._on_fullscreen)
+            row.addWidget(self.btn_fullscreen, 0)
+            self.sync_fullscreen_btn(False)
+
         if self._window_controls:
             self.btn_min = QPushButton("–")
             self.btn_min.setObjectName("dialogClose")
@@ -138,6 +151,17 @@ class _DragBar(QFrame):
             btn_close.clicked.connect(host.close)
         row.addWidget(btn_close, 0)
         self._sync_max_btn()
+
+    def sync_fullscreen_btn(self, fullscreen: bool) -> None:
+        if self.btn_fullscreen is None:
+            return
+        if fullscreen:
+            # BMP glyphs — avoid emoji-plane symbols missing on Ubuntu 18.04 fonts.
+            self.btn_fullscreen.setText("↙")
+            self.btn_fullscreen.setToolTip(i18n.t("viewer_exit_fullscreen"))
+        else:
+            self.btn_fullscreen.setText("▣")
+            self.btn_fullscreen.setToolTip(i18n.t("viewer_fullscreen"))
 
     def _toggle_max(self) -> None:
         if self._host.isMaximized():

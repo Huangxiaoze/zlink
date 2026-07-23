@@ -259,12 +259,11 @@ class RemoteCanvas(QWidget):
 
 
 class ViewerChromeBar(QFrame):
-    """Top-edge pull-down control: send/browse files + fullscreen."""
+    """Top-edge pull-down control: send/browse files + terminal."""
 
     def __init__(
         self,
         parent: QWidget,
-        on_toggle: Callable[[], None],
         on_send_file: Callable[[], None],
         on_browse_files: Callable[[], None],
         on_terminal: Callable[[], None],
@@ -300,14 +299,6 @@ class ViewerChromeBar(QFrame):
         self.btn_term.clicked.connect(on_terminal)
         lay.addWidget(self.btn_term)
         lay.addStretch(1)
-
-        # Keep fullscreen near the window caption buttons (minimize/close).
-        self.btn_action = QPushButton(i18n.t("viewer_fullscreen"))
-        self.btn_action.setObjectName("viewerChromeBtn")
-        self.btn_action.setCursor(PointingHandCursor)
-        self.btn_action.setFocusPolicy(NoFocus)
-        self.btn_action.clicked.connect(on_toggle)
-        lay.addWidget(self.btn_action)
         self.hide()
 
     def enterEvent(self, event) -> None:  # noqa: N802
@@ -364,6 +355,7 @@ class RemoteClientWindow(QMainWindow):
             False,
             window_controls=True,
             compact=True,
+            on_fullscreen=self._toggle_fullscreen,
         )
         layout.addWidget(self._drag)
 
@@ -379,7 +371,6 @@ class RemoteClientWindow(QMainWindow):
         # Overlay the canvas only — never cover the custom title bar.
         self.chrome_bar = ViewerChromeBar(
             self.canvas,
-            on_toggle=self._toggle_fullscreen,
             on_send_file=self._pick_and_send_file,
             on_browse_files=self._open_remote_files,
             on_terminal=self._open_terminal,
@@ -453,11 +444,12 @@ class RemoteClientWindow(QMainWindow):
     def _set_fullscreen(self, enabled: bool) -> None:
         self._hide_chrome_bar()
         if enabled:
-            self._drag.hide()
             self.showFullScreen()
         else:
-            self._drag.show()
             self.showNormal()
+        # Keep the caption bar visible so exit-fullscreen stays next to window controls.
+        self._drag.show()
+        self._drag.sync_fullscreen_btn(enabled)
         self.canvas.setFocus(MouseFocusReason)
 
     def _on_canvas_mouse_y(self, y: float) -> None:
@@ -477,10 +469,6 @@ class RemoteClientWindow(QMainWindow):
 
     def _show_chrome_bar(self) -> None:
         self._chrome_hide_timer.stop()
-        if self.isFullScreen():
-            self.chrome_bar.btn_action.setText(i18n.t("viewer_exit_fullscreen"))
-        else:
-            self.chrome_bar.btn_action.setText(i18n.t("viewer_fullscreen"))
         self.chrome_bar.btn_send.setText(i18n.t("viewer_send_file"))
         self.chrome_bar.btn_browse.setText(i18n.t("viewer_browse_files"))
         self.chrome_bar.btn_term.setText(i18n.t("viewer_terminal"))
