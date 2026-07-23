@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import sys
+from typing import Any, Optional
 
 from pynput.keyboard import Controller as KeyController
 from pynput.keyboard import Key
@@ -9,6 +10,21 @@ from pynput.mouse import Button
 from pynput.mouse import Controller as MouseController
 
 log = logging.getLogger(__name__)
+
+# Physical key above Tab. GNOME binds switch-group to <Alt>/<Super>Above_Tab,
+# which is NOT the same keysym as plain grave/` — char injection misses it.
+_GRAVE_NAMES = frozenset({"`", "grave", "quoteleft", "above_tab", "abovetab"})
+_MODIFIER_KEYS = frozenset(
+    {
+        Key.alt,
+        Key.alt_l,
+        getattr(Key, "alt_r", Key.alt),
+        getattr(Key, "alt_gr", Key.alt),
+        Key.cmd,
+        Key.cmd_l,
+        Key.cmd_r,
+    }
+)
 
 _SPECIAL_KEYS: dict[str, Key] = {
     "enter": Key.enter,
@@ -71,6 +87,8 @@ class InputInjector:
         self._keyboard = KeyController()
         self._pressed_keys: set[Any] = set()
         self._pressed_buttons: set[Button] = set()
+        # Logical protocol name -> object actually pressed (modifier-dependent resolve).
+        self._injected_by_name: dict[str, Any] = {}
 
     def set_screen_size(self, width: int, height: int) -> None:
         self.screen_w = max(1, width)
@@ -112,12 +130,17 @@ class InputInjector:
         key_name = str(msg.get("key", ""))
         if not key_name:
             return
-        key = _resolve_key(key_name)
+        name_key = key_name.lower()
         try:
             if action == "down":
+                key = _resolve_key(key_name, self._pressed_keys)
                 self._keyboard.press(key)
                 self._pressed_keys.add(key)
+                self._injected_by_name[name_key] = key
             elif action == "up":
+                key = self._injected_by_name.pop(name_key, None)
+                if key is None:
+                    key = _resolve_key(key_name, self._pressed_keys)
                 self._keyboard.release(key)
                 self._pressed_keys.discard(key)
             elif action == "type":
@@ -129,6 +152,7 @@ class InputInjector:
         """Release stuck keys (e.g. Alt left down after local Alt+Tab stole focus)."""
         stuck = list(self._pressed_keys)
         self._pressed_keys.clear()
+        self._injected_by_name.clear()
         for key in stuck:
             try:
                 self._keyboard.release(key)
@@ -168,10 +192,41 @@ class InputInjector:
         self.release_all_buttons()
 
 
-def _resolve_key(name: str):
+def _modifier_held(pressed: Optional[set[Any]]) -> bool:
+    if not pressed:
+        return False
+    return any(key in _MODIFIER_KEYS for key in pressed)
+
+
+def _x11_key_from_symbol(symbol: str):
+    """Resolve an X11 keysym via pynput's Linux backend (None on other platforms)."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        from pynput.keyboard import KeyCode
+
+        from_symbol = getattr(KeyCode, "_from_symbol", None)
+        if callable(from_symbol):
+            key = from_symbol(symbol)
+            if key is not None and getattr(key, "vk", 0):
+                return key
+    except Exception:
+        log.debug("x11 keysym resolve failed symbol=%s", symbol, exc_info=True)
+    return None
+
+
+def _resolve_key(name: str, pressed: Optional[set[Any]] = None):
     lowered = name.lower()
     if lowered in _SPECIAL_KEYS:
         return _SPECIAL_KEYS[lowered]
+    if lowered in _GRAVE_NAMES:
+        # Ubuntu/GNOME: switch-group is <Alt>Above_Tab / <Super>Above_Tab.
+        want_above_tab = lowered in {"above_tab", "abovetab"} or _modifier_held(pressed)
+        if want_above_tab:
+            above = _x11_key_from_symbol("Above_Tab")
+            if above is not None:
+                return above
+        return "`"
     if len(name) == 1:
         return name
     # pygame-style names like "a", "K_a" etc.

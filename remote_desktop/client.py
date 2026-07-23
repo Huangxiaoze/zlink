@@ -1145,8 +1145,8 @@ class RemoteClientPage(QWidget):
         except (ConnectionError, OSError):
             self._stop.set()
             return
-        # Alt often released before Tab when finishing Alt+Tab — force Tab-up.
-        if action == "up" and key in {"alt", "alt_l", "alt_r"}:
+        # Alt often released before Tab/` when finishing Alt+Tab / Alt+` — force up.
+        if action == "up" and key in {"alt", "alt_l", "alt_r", "cmd", "cmd_l", "cmd_r", "win"}:
             shell = self._shell
             if shell is not None:
                 try:
@@ -1155,6 +1155,9 @@ class RemoteClientPage(QWidget):
                     pass
             if "tab" in self._pressed_keys:
                 self._handle_key("up", "tab")
+            for grave_name in ("grave", "`", "above_tab"):
+                if grave_name in self._pressed_keys:
+                    self._handle_key("up", grave_name)
 
 
 def _qt_button(button: Any) -> str:

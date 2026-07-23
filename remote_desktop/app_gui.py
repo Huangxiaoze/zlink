@@ -1553,8 +1553,17 @@ class MainWindow(QMainWindow):
             return
 
         net = NetConfig(host=host, port=port, password=password)
-        # Child of main window, modeless — does not block the home UI.
-        win = DirectTerminalWindow(net=net, title=title, parent=self, reconnect=True)
+        try:
+            # Child of main window, modeless — does not block the home UI.
+            win = DirectTerminalWindow(net=net, title=title, parent=self, reconnect=True)
+        except Exception as exc:
+            log.exception("open terminal window failed")
+            show_error(
+                self,
+                title=i18n.t("error"),
+                message=i18n.t("terminal_failed", error=str(exc)),
+            )
+            return
         win.device_id = device_id
         win.setAttribute(WA_DeleteOnClose, True)
         self._terminals.append(win)

@@ -505,6 +505,9 @@ KEY_MAP_SRC = [
     ("Key_Shift", "shift"),
     ("Key_Alt", "alt"),
     ("Key_Meta", "cmd"),
+    # Key above Tab (US `~). Stable name so Alt/Meta combos can map to X11 Above_Tab.
+    ("Key_QuoteLeft", "grave"),
+    ("Key_Dead_Grave", "grave"),
     ("Key_F1", "f1"),
     ("Key_F2", "f2"),
     ("Key_F3", "f3"),
@@ -644,25 +647,52 @@ def qt_key_in(key: Any, *candidates: Any) -> bool:
 def make_window_flags(*flags: Any) -> Any:
     """Combine window flags for ``setWindowFlags`` on PySide2 and PySide6.
 
-    PySide2 often cannot ``|`` WindowType enums directly, and also rejects a plain
-    ``int`` — ``setWindowFlags`` expects ``Qt.WindowFlags``.
+    PySide2 rejects a plain ``int`` — it expects ``Qt.WindowFlags``. Prefer native
+    enum ``|`` when it works; otherwise wrap the combined bitmask with
+    ``Qt.WindowFlags(...)``.
     """
-    value = 0
-    for flag in flags:
-        value |= qt_enum_int(flag)
+    if not flags:
+        raise ValueError("need at least one window flag")
+
+    try:
+        combined = flags[0]
+        for flag in flags[1:]:
+            combined = combined | flag
+        if not isinstance(combined, int):
+            return combined
+    except TypeError:
+        combined = None
+
+    value = int(combined) if isinstance(combined, int) else 0
+    if not isinstance(combined, int):
+        for flag in flags:
+            value |= qt_enum_int(flag)
+
     window_flags = getattr(Qt, "WindowFlags", None)
     if window_flags is not None:
         try:
             return window_flags(value)
         except TypeError:
             pass
+
+    if QT_API == "PySide2":
+        try:
+            return Qt.WindowFlags(value)  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            pass
+
     try:
-        result = flags[0]
+        combined = flags[0]
         for flag in flags[1:]:
-            result = result | flag
-        return result
+            combined = combined | flag
+        if not isinstance(combined, int):
+            return combined
     except TypeError:
-        return value
+        pass
+
+    if window_flags is not None:
+        return window_flags(value)
+    return value
 
 
 def make_dialog_button_box(*buttons: Any) -> QDialogButtonBox:

@@ -8,6 +8,7 @@ import time
 from typing import Callable, Optional
 
 from . import PROTOCOL_VERSION
+from .terminal_pty import FEATURE_TERMINAL
 from .config import NetConfig
 from .confirm_dialog import DialogDragBar, ask_confirm, make_frameless_dialog
 from .i18n import i18n
@@ -44,6 +45,7 @@ from .qt_bind import (
     WA_OpaquePaintEvent,
     WA_StyledBackground,
     qt_enum_eq,
+    qt_enum_int,
     set_font_families,
 )
 from .themes import CURRENT
@@ -173,7 +175,11 @@ class TerminalCanvas(QWidget):
         painter.fillRect(self.rect(), QColor("#0E151C"))
         if self.screen is None:
             painter.setPen(QColor(CURRENT.text))
-            painter.drawText(self.rect(), int(AlignLeft) | int(AlignTop), "pyte is required for terminal")
+            painter.drawText(
+                self.rect(),
+                qt_enum_int(AlignLeft) | qt_enum_int(AlignTop),
+                "pyte is required for terminal",
+            )
             return
         painter.setFont(self._font)
         painter.setPen(QColor("#D7E2EA"))
@@ -615,7 +621,7 @@ class DirectTerminalWindow(QDialog):
                     raise ProtocolError(i18n.t("terminal_busy"))
                 raise ProtocolError(reason)
             features = ack.get("features") or []
-            if "terminal" not in features:
+            if FEATURE_TERMINAL not in features:
                 raise ProtocolError(i18n.t("terminal_unsupported"))
 
             session_stop = threading.Event()

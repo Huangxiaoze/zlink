@@ -121,6 +121,8 @@ def _hidden_imports() -> list[str]:
         "PIL",
         "pynput",
         "pyte",
+        "pyte.screens",
+        "pyte.streams",
     ]
     system = platform.system().lower()
     if system == "windows":
