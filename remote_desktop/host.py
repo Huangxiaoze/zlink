@@ -12,6 +12,7 @@ from .config import HostConfig, StreamConfig
 from .devices import detect_os_label, remote_username
 from .input_io import InputInjector
 from .net import Connection, password_matches, serve_forever
+from .pointer_sync import PointerAuthority
 from .protocol import MsgType, ProtocolError, decode_json, pack_frame_message
 from .terminal_pty import FEATURE_TERMINAL, HostTerminalBridge
 
@@ -43,6 +44,7 @@ class RemoteHost:
         # Optional wakeup for GUI (e.g. Qt Signal.emit) — called from recv thread.
         self.clipboard_notify: Optional[Callable[[], None]] = None
         self.file_notify: Optional[Callable[[], None]] = None
+        self._pointer = PointerAuthority()
 
     def stop(self) -> None:
         self._stop.set()
@@ -203,6 +205,7 @@ class RemoteHost:
         watchdog: threading.Thread | None = None
         injector: InputInjector | None = None
         session_stop = threading.Event()
+        mouse_listener: Any = None
         self._clear_session_queues()
         self._term = HostTerminalBridge(self._enqueue_term)
 
@@ -224,7 +227,31 @@ class RemoteHost:
             )
 
             self.session_live.set()
-            injector = InputInjector(self._capturer.src_width, self._capturer.src_height)
+            injector = InputInjector(
+                self._capturer.src_width,
+                self._capturer.src_height,
+                pointer=self._pointer,
+            )
+            try:
+                from pynput import mouse as pynput_mouse
+
+                ptr = self._pointer
+
+                def _on_local_pointer_move(x: float, y: float) -> None:
+                    if injector is None:
+                        return
+                    ptr.note_local_move(
+                        int(x),
+                        int(y),
+                        injector.screen_w,
+                        injector.screen_h,
+                    )
+
+                mouse_listener = pynput_mouse.Listener(on_move=_on_local_pointer_move)
+                mouse_listener.start()
+            except Exception:
+                log.warning("local pointer listener unavailable", exc_info=True)
+                mouse_listener = None
             sender = threading.Thread(
                 target=self._send_loop,
                 args=(conn, session_stop),
@@ -247,6 +274,11 @@ class RemoteHost:
         finally:
             session_stop.set()
             self.session_live.clear()
+            if mouse_listener is not None:
+                try:
+                    mouse_listener.stop()
+                except Exception:
+                    pass
             if injector is not None:
                 injector.release_all()
             if self._term is not None:
@@ -374,6 +406,7 @@ class RemoteHost:
             if frame is None:
                 session_stop.wait(0.002)
                 continue
+            cx, cy, host_ptr = self._pointer.snapshot()
             packet = pack_frame_message(
                 frame.jpeg,
                 width=frame.width,
@@ -381,6 +414,9 @@ class RemoteHost:
                 seq=self._capturer.sequence,
                 quality=frame.quality,
                 scale=frame.scale,
+                cursor_x=cx,
+                cursor_y=cy,
+                host_pointer=host_ptr,
             )
             if not conn.try_send_raw(packet):
                 send_failures += 1

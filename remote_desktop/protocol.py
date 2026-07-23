@@ -78,6 +78,9 @@ def pack_frame_message(
     seq: int,
     quality: int,
     scale: float,
+    cursor_x: float | None = None,
+    cursor_y: float | None = None,
+    host_pointer: bool = False,
 ) -> bytes:
     meta = {
         "w": width,
@@ -86,6 +89,11 @@ def pack_frame_message(
         "q": quality,
         "scale": scale,
     }
+    if cursor_x is not None and cursor_y is not None:
+        meta["cx"] = round(float(cursor_x), 5)
+        meta["cy"] = round(float(cursor_y), 5)
+    if host_pointer:
+        meta["host_ptr"] = 1
     payload = json.dumps(meta, separators=(",", ":")).encode("utf-8") + b"\n\n" + jpeg
     return pack_frame(MsgType.FRAME, payload)
 

@@ -236,6 +236,14 @@ PointingHandCursor = _enum(
     getattr(Qt, "PointingHandCursor", None),
     getattr(getattr(Qt, "CursorShape", None), "PointingHandCursor", None),
 )
+BlankCursor = _enum(
+    getattr(Qt, "BlankCursor", None),
+    getattr(getattr(Qt, "CursorShape", None), "BlankCursor", None),
+)
+ArrowCursor = _enum(
+    getattr(Qt, "ArrowCursor", None),
+    getattr(getattr(Qt, "CursorShape", None), "ArrowCursor", None),
+)
 AlignCenter = _enum(
     getattr(Qt, "AlignCenter", None),
     getattr(getattr(Qt, "AlignmentFlag", None), "AlignCenter", None),

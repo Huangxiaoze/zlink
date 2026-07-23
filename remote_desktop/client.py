@@ -34,6 +34,8 @@ from .net import Connection, connect_to
 from .protocol import MsgType, ProtocolError, decode_json, unpack_file_message, unpack_frame_message
 from .qt_bind import (
     AltModifier,
+    ArrowCursor,
+    BlankCursor,
     Antialiasing,
     ApplicationActive,
     ControlModifier,
@@ -131,6 +133,10 @@ class RemoteCanvas(QWidget):
         self._scaled = QPixmap()
         self._scaled_for = (0, 0)
         self._blit_rect = (0, 0, 0, 0)
+        self._remote_cx = 0.5
+        self._remote_cy = 0.5
+        self._show_remote_cursor = False
+        self._host_pointer_passive = False
         self.on_mouse: Optional[Callable[[str, float, float, Dict[str, Any]], None]] = None
         self.on_key: Optional[Callable[[str, str], None]] = None
         # Called before injecting Ctrl+V so local clipboard can be pushed first.
@@ -144,6 +150,43 @@ class RemoteCanvas(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(StrongFocus)
         self.setMinimumSize(320, 240)
+        self.setCursor(ArrowCursor)
+
+    def set_remote_cursor(self, norm_x: float, norm_y: float) -> None:
+        self._remote_cx = max(0.0, min(1.0, float(norm_x)))
+        self._remote_cy = max(0.0, min(1.0, float(norm_y)))
+        self._show_remote_cursor = True
+        self.update()
+
+    def set_pointer_passive(self, passive: bool) -> None:
+        passive = bool(passive)
+        if passive == self._host_pointer_passive:
+            return
+        self._host_pointer_passive = passive
+        self.setCursor(BlankCursor if passive else ArrowCursor)
+        self.update()
+
+    def _draw_remote_cursor(self, painter: QPainter) -> None:
+        if not self._show_remote_cursor:
+            return
+        bx, by, bw, bh = self._blit_rect
+        if bw <= 0 or bh <= 0:
+            return
+        px = bx + self._remote_cx * bw
+        py = by + self._remote_cy * bh
+        painter.setRenderHint(Antialiasing, True)
+        outline = QPen(QColor(0, 0, 0, 210))
+        outline.setWidthF(2.0)
+        painter.setPen(outline)
+        painter.setBrush(QColor(255, 255, 255, 230))
+        painter.drawEllipse(int(round(px - 5)), int(round(py - 5)), 10, 10)
+        painter.drawLine(int(round(px - 10)), int(round(py)), int(round(px + 10)), int(round(py)))
+        painter.drawLine(int(round(px)), int(round(py - 10)), int(round(px)), int(round(py + 10)))
+        fill = QPen(QColor(255, 80, 80, 240))
+        fill.setWidthF(1.5)
+        painter.setPen(fill)
+        painter.setBrush(QColor(255, 80, 80, 200))
+        painter.drawEllipse(int(round(px - 2.5)), int(round(py - 2.5)), 5, 5)
 
     def focusNextPrevChild(self, _next: bool) -> bool:  # noqa: N802
         # Keep keyboard focus on the canvas so Tab / shortcuts stay remote-bound.
@@ -186,6 +229,7 @@ class RemoteCanvas(QWidget):
             self._blit_rect = (x, y, sw, sh)
             painter.fillRect(self.rect(), black)
             painter.drawPixmap(x, y, self._scaled)
+            self._draw_remote_cursor(painter)
 
     def _norm(self, px: float, py: float) -> Optional[Tuple[float, float]]:
         x, y, w, h = self._blit_rect
@@ -221,6 +265,10 @@ class RemoteCanvas(QWidget):
         px, py = event_pos(event)
         norm = self._norm(px, py)
         if norm and self.on_mouse:
+            host = self.host_window
+            if host is not None and host.block_mouse_action("scroll"):
+                super().wheelEvent(event)
+                return
             if hasattr(event, "angleDelta"):
                 delta = event.angleDelta()
                 dy = 1 if delta.y() > 0 else -1 if delta.y() < 0 else 0
@@ -289,6 +337,9 @@ class RemoteCanvas(QWidget):
 
     def _emit_mouse(self, action: str, event: QMouseEvent, **extra: Any) -> None:
         if not self.on_mouse:
+            return
+        host = self.host_window
+        if host is not None and host.block_mouse_action(action):
             return
         px, py = event_pos(event)
         norm = self._norm(px, py)
@@ -462,6 +513,7 @@ class RemoteClientPage(QWidget):
         self._terminal: Optional[RemoteTerminalWindow] = None
         self._pressed_keys: Set[str] = set()
         self._input_armed = True
+        self._host_pointer_active = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -750,6 +802,34 @@ class RemoteClientPage(QWidget):
         caption = "%s — %s" % (self._base_title, text) if text else self._base_title
         self.caption_changed.emit(caption)
 
+    def block_mouse_action(self, action: str) -> bool:
+        """True when the host is driving the pointer and this action should not inject."""
+        if not self._host_pointer_active:
+            return False
+        if action == "down":
+            self._host_pointer_active = False
+            self.canvas.set_pointer_passive(False)
+            self._bus.status.emit("")
+            return False
+        return True
+
+    def _apply_frame_pointer_meta(self, meta: dict[str, Any]) -> None:
+        cx = meta.get("cx")
+        cy = meta.get("cy")
+        if cx is not None and cy is not None:
+            try:
+                self.canvas.set_remote_cursor(float(cx), float(cy))
+            except (TypeError, ValueError):
+                pass
+        host_ptr = bool(meta.get("host_ptr"))
+        if host_ptr != self._host_pointer_active:
+            self._host_pointer_active = host_ptr
+            self.canvas.set_pointer_passive(host_ptr)
+            if host_ptr:
+                self._bus.status.emit(i18n.t("viewer_host_pointer"))
+            else:
+                self._bus.status.emit("")
+
     def _on_frame_jpeg(self, jpeg: object, meta: object) -> None:
         with self._lock:
             self._pending_jpeg = bytes(jpeg) if jpeg is not None else None
@@ -758,9 +838,11 @@ class RemoteClientPage(QWidget):
     def _present_pending(self) -> None:
         with self._lock:
             jpeg = self._pending_jpeg
+            meta = dict(self._pending_meta)
             self._pending_jpeg = None
         if not jpeg:
             return
+        self._apply_frame_pointer_meta(meta)
         image = QImage.fromData(jpeg, "JPEG")
         if image.isNull():
             return
@@ -1129,7 +1211,7 @@ class RemoteClientPage(QWidget):
             session_stop.wait(min(1.0, interval))
 
     def _handle_mouse(self, action: str, x: float, y: float, extra: Dict[str, Any]) -> None:
-        if not self._input_armed:
+        if not self._input_armed or self._host_pointer_active:
             return
         conn = self._conn
         if not conn or conn.closed:

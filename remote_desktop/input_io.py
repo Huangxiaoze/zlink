@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from pynput.keyboard import Controller as KeyController
 from pynput.keyboard import Key
 from pynput.mouse import Button
 from pynput.mouse import Controller as MouseController
+
+if TYPE_CHECKING:
+    from .pointer_sync import PointerAuthority
 
 log = logging.getLogger(__name__)
 
@@ -80,9 +83,15 @@ _BUTTONS = {
 
 
 class InputInjector:
-    def __init__(self, screen_w: int, screen_h: int) -> None:
+    def __init__(
+        self,
+        screen_w: int,
+        screen_h: int,
+        pointer: Optional["PointerAuthority"] = None,
+    ) -> None:
         self.screen_w = max(1, screen_w)
         self.screen_h = max(1, screen_h)
+        self._pointer = pointer
         self._mouse = MouseController()
         self._keyboard = KeyController()
         self._pressed_keys: set[Any] = set()
@@ -99,6 +108,8 @@ class InputInjector:
         if action == "flush":
             self.release_all_buttons()
             return
+        if self._pointer is not None:
+            self._pointer.note_remote_inject()
         x = float(msg.get("x", 0.0))
         y = float(msg.get("y", 0.0))
         abs_x = int(max(0.0, min(1.0, x)) * (self.screen_w - 1))
