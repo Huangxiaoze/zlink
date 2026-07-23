@@ -210,12 +210,9 @@ class DeviceCard(QFrame):
         self.lbl_status.setObjectName("cardStatus")
         self.lbl_os = QLabel()
         self.lbl_os.setObjectName("cardOs")
-        self.lbl_last = QLabel()
-        self.lbl_last.setObjectName("cardMeta")
         top.addWidget(self.lbl_status, 0)
         top.addWidget(self.lbl_os, 0)
         top.addStretch(1)
-        top.addWidget(self.lbl_last, 0)
 
         self.lbl_name = QLabel()
         self.lbl_name.setObjectName("cardName")
@@ -273,10 +270,6 @@ class DeviceCard(QFrame):
         else:
             self.lbl_os.setText(i18n.t("os_unknown"))
             self.lbl_os.setVisible(True)
-        if device.last_connected:
-            self.lbl_last.setText(i18n.t("last_connected", time=_fmt_time(device.last_connected)))
-        else:
-            self.lbl_last.setText(i18n.t("never_connected"))
         self.lbl_name.setText(device.name)
         self.lbl_host.setText(device.host)
         notes = (device.notes or "").strip()
@@ -1664,12 +1657,6 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.quit()
-
-
-def _fmt_time(ts: float | None) -> str:
-    if not ts:
-        return "-"
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
 
 def run_app() -> None:
