@@ -447,9 +447,30 @@ class MainWindow(QMainWindow):
     def _build(self) -> None:
         self.resize(1120, 700)
         self.setMinimumSize(920, 580)
+        make_frameless_dialog(self, modal=False, as_window=True)
+
+        shell = QWidget()
+        shell.setObjectName("root")
+        shell_l = QVBoxLayout(shell)
+        shell_l.setContentsMargins(0, 0, 0, 0)
+        shell_l.setSpacing(0)
+
+        self._drag = DialogDragBar(
+            self,
+            i18n.t("app_title"),
+            "info",
+            False,
+            window_controls=True,
+            show_maximize=False,
+            compact=True,
+        )
+        shell_l.addWidget(self._drag)
+
         root = QWidget()
-        root.setObjectName("root")
-        self.setCentralWidget(root)
+        root.setObjectName("rootBody")
+        shell_l.addWidget(root, 1)
+        self.setCentralWidget(shell)
+
         outer = QHBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -687,7 +708,11 @@ class MainWindow(QMainWindow):
             app.setQuitOnLastWindowClosed(False)
 
     def retranslate(self) -> None:
-        self.setWindowTitle(i18n.t("app_title"))
+        title = i18n.t("app_title")
+        self.setWindowTitle(title)
+        drag = getattr(self, "_drag", None)
+        if drag is not None:
+            drag.lbl_title.setText(title)
         if self._tray is not None:
             self._tray.retranslate()
         self.lbl_brand.setText(i18n.t("brand"))

@@ -1058,7 +1058,7 @@ def build_stylesheet(theme_id: str | None = None) -> str:
     on_accent = _contrast_text(c.accent)
     on_accent_2 = _contrast_text(c.accent_2)
     return f"""
-QMainWindow, QWidget#root {{
+QMainWindow, QWidget#root, QWidget#rootBody {{
     background: {c.bg};
     color: {c.text};
 }}

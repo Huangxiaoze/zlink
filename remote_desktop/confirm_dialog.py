@@ -77,6 +77,7 @@ class _DragBar(QFrame):
         *,
         window_controls: bool = False,
         compact: bool = False,
+        show_maximize: bool = True,
         on_fullscreen: Optional[Callable[[], None]] = None,
         on_hover: Optional[Callable[[bool], None]] = None,
     ) -> None:
@@ -84,6 +85,7 @@ class _DragBar(QFrame):
         self._host = host
         self._drag_offset = None
         self._window_controls = bool(window_controls)
+        self._show_maximize = bool(show_maximize)
         self._compact = bool(compact)
         self._on_fullscreen = on_fullscreen
         self._on_hover = on_hover
@@ -131,14 +133,15 @@ class _DragBar(QFrame):
             self.btn_min.clicked.connect(host.showMinimized)
             row.addWidget(self.btn_min, 0)
 
-            self.btn_max = QPushButton("□")
-            self.btn_max.setObjectName("dialogClose")
-            self.btn_max.setToolTip(i18n.t("window_maximize"))
-            self.btn_max.setCursor(PointingHandCursor)
-            self.btn_max.setFocusPolicy(NoFocus)
-            self.btn_max.setFixedSize(btn_w, btn_h)
-            self.btn_max.clicked.connect(self._toggle_max)
-            row.addWidget(self.btn_max, 0)
+            if self._show_maximize:
+                self.btn_max = QPushButton("□")
+                self.btn_max.setObjectName("dialogClose")
+                self.btn_max.setToolTip(i18n.t("window_maximize"))
+                self.btn_max.setCursor(PointingHandCursor)
+                self.btn_max.setFocusPolicy(NoFocus)
+                self.btn_max.setFixedSize(btn_w, btn_h)
+                self.btn_max.clicked.connect(self._toggle_max)
+                row.addWidget(self.btn_max, 0)
 
         btn_close = QPushButton("×")
         btn_close.setObjectName("dialogClose")
@@ -211,7 +214,11 @@ class _DragBar(QFrame):
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
-        if self._window_controls and qt_enum_eq(event.button(), LeftButton):
+        if (
+            self.btn_max is not None
+            and self._window_controls
+            and qt_enum_eq(event.button(), LeftButton)
+        ):
             self._toggle_max()
             event.accept()
             return
