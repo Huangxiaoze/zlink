@@ -15,9 +15,6 @@ from .file_transfer import (
 )
 from .i18n import i18n
 from .qt_bind import (
-    AlignLeft,
-    AlignRight,
-    AlignVCenter,
     Fixed,
     NoEditTriggers,
     NoFocus,
@@ -30,7 +27,6 @@ from .qt_bind import (
     QLineEdit,
     QPainter,
     QPushButton,
-    QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTableWidget,
@@ -46,6 +42,11 @@ from .qt_bind import (
     qt_enum_int,
 )
 from .themes import CURRENT
+
+# Plain ints — avoid Qt enum objects entirely (PySide2 StateFlag/AlignmentFlag crash).
+_ALIGN_LEFT_VCENTER = 0x0001 | 0x0080  # Qt.AlignLeft | Qt.AlignVCenter
+_ALIGN_RIGHT_VCENTER = 0x0002 | 0x0080  # Qt.AlignRight | Qt.AlignVCenter
+_USER_ROLE = 256  # Qt.UserRole
 
 
 def _fmt_size(size: int, is_dir: bool) -> str:
@@ -69,172 +70,96 @@ def _fmt_mtime(ts: int) -> str:
         return "—"
 
 
-def _align(item: QTableWidgetItem, *flags: Any) -> None:
+def _align(item: QTableWidgetItem, align: int = _ALIGN_LEFT_VCENTER) -> None:
     try:
-        item.setTextAlignment(_align_flags(*flags))
+        item.setTextAlignment(int(align))
     except Exception:
         pass
-
-
-def _align_flags(*flags: Any) -> int:
-    value = 0
-    for flag in flags:
-        try:
-            value |= qt_enum_int(flag)
-        except Exception:
-            continue
-    return int(value)
-
-
-def _state_flag(name: str) -> Any:
-    # Prefer QStyle.State_* (int-compatible on PySide2). StateFlag enum members
-    # cannot be used with ``&`` / ``int()`` on Ubuntu 18.04 PySide2.
-    for obj in (
-        QStyle,
-        getattr(QStyle, "State", None),
-        getattr(QStyle, "StateFlag", None),
-    ):
-        if obj is None:
-            continue
-        flag = getattr(obj, name, None)
-        if flag is not None:
-            return flag
-    return None
-
-
-# Qt5/Qt6 QStyle::State bits used when enum→int conversion fails (PySide2).
-_STATE_BITS = {
-    "State_Selected": 0x00008000,
-    "State_MouseOver": 0x00002000,  # Qt6; Qt5 also exposes State_Hover=0x40
-    "State_Hover": 0x00000040,
-}
-
-
-def _flag_bits(flag: Any, name: str = "") -> int:
-    try:
-        return qt_enum_int(flag)
-    except Exception:
-        pass
-    for attr in ("value", "_value_"):
-        raw = getattr(flag, attr, None)
-        if raw is None:
-            continue
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            continue
-    if name in _STATE_BITS:
-        return int(_STATE_BITS[name])
-    # Last resort: some PySide2 builds stringify like "...State_Selected".
-    text = str(flag)
-    for key, bits in _STATE_BITS.items():
-        if key in text:
-            return int(bits)
-    return 0
-
-
-def _has_state(state: Any, name: str) -> bool:
-    if state is None:
-        return False
-    flag = _state_flag(name)
-    try:
-        state_bits = _flag_bits(state)
-    except Exception:
-        try:
-            state_bits = int(state)
-        except Exception:
-            return False
-    flag_bits = _flag_bits(flag, name) if flag is not None else _STATE_BITS.get(name, 0)
-    if not flag_bits:
-        return False
-    # Qt5 uses State_Hover (0x40); Qt6 primarily State_MouseOver (0x2000).
-    if name == "State_MouseOver":
-        flag_bits |= _STATE_BITS.get("State_Hover", 0)
-    return bool(int(state_bits) & int(flag_bits))
 
 
 def _item_role() -> int:
     try:
-        return qt_enum_int(UserRole)
+        return int(qt_enum_int(UserRole))
     except Exception:
-        return 256
+        return _USER_ROLE
 
 
 class RemoteFileItemDelegate(QStyledItemDelegate):
     """Paint row chrome + text ourselves.
 
-    Mixing QSS ``drawControl`` with manual ``drawText`` is unreliable: the style
-    may still paint model text, then a mismatched pen covers file names.
+    Important for Ubuntu 18.04 / PySide2: never read ``option.state`` or use
+    ``QStyle.StateFlag`` / AlignmentFlag objects — ``int()`` / ``&`` on them
+    raises TypeError and can even mis-report at ``painter.save()``.
     """
+
+    def __init__(self, table: QTableWidget) -> None:
+        super().__init__(table)
+        self._table = table
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # type: ignore[override]
         try:
             self._paint_row(painter, option, index)
         except Exception:
-            # Never let a PySide2 enum quirk blank the whole browser.
             try:
                 super().paint(painter, option, index)
             except Exception:
                 pass
 
-    def _paint_row(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
+    def _row_selected(self, index) -> bool:
+        try:
+            sm = self._table.selectionModel()
+            return bool(sm is not None and sm.isSelected(index))
+        except Exception:
+            return False
 
+    def _paint_row(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        rect = option.rect
         role = _item_role()
         entry = index.sibling(index.row(), 0).data(role)
         is_dir = isinstance(entry, dict) and bool(entry.get("is_dir"))
-        col = index.column()
+        col = int(index.column())
         text = str(index.data() or "")
-
-        selected = _has_state(getattr(opt, "state", None), "State_Selected")
-        hover = _has_state(getattr(opt, "state", None), "State_MouseOver")
+        selected = self._row_selected(index)
 
         painter.save()
         try:
-            painter.setClipRect(opt.rect)
-
-            # Background from the same palette as text colors → always readable.
-            painter.fillRect(opt.rect, QColor(CURRENT.input_bg))
-            if (index.row() % 2) == 1 and not selected:
+            painter.setClipRect(rect)
+            painter.fillRect(rect, QColor(CURRENT.input_bg))
+            if (int(index.row()) % 2) == 1 and not selected:
                 alt = QColor(CURRENT.text)
                 alt.setAlpha(12)
-                painter.fillRect(opt.rect, alt)
-            if hover and not selected:
-                wash = QColor(CURRENT.accent)
-                wash.setAlpha(26)
-                painter.fillRect(opt.rect, wash)
+                painter.fillRect(rect, alt)
             if selected:
-                painter.fillRect(opt.rect, QColor(CURRENT.card_selected))
+                painter.fillRect(rect, QColor(CURRENT.card_selected))
 
             if col == 0:
                 color = QColor(CURRENT.accent if is_dir else CURRENT.text)
                 label = ("▸  %s" % text) if is_dir else ("    %s" % text)
-                font = QFont(opt.font)
+                font = QFont(option.font)
                 if is_dir:
                     font.setBold(True)
-                align = _align_flags(AlignLeft, AlignVCenter)
+                align = _ALIGN_LEFT_VCENTER
             elif col == 1:
                 color = QColor(CURRENT.accent if is_dir else CURRENT.muted)
                 label = text
-                font = QFont(opt.font)
+                font = QFont(option.font)
                 if is_dir:
                     font.setBold(True)
-                align = _align_flags(AlignLeft, AlignVCenter)
+                align = _ALIGN_LEFT_VCENTER
             elif col == 2:
                 color = QColor(CURRENT.muted)
                 label = text
-                font = QFont(opt.font)
-                align = _align_flags(AlignRight, AlignVCenter)
+                font = QFont(option.font)
+                align = _ALIGN_RIGHT_VCENTER
             else:
                 color = QColor(CURRENT.muted)
                 label = text
-                font = QFont(opt.font)
-                align = _align_flags(AlignLeft, AlignVCenter)
+                font = QFont(option.font)
+                align = _ALIGN_LEFT_VCENTER
 
             painter.setPen(color)
             painter.setFont(font)
-            painter.drawText(opt.rect.adjusted(10, 0, -8, 0), int(align), label)
+            painter.drawText(rect.adjusted(10, 0, -8, 0), int(align), label)
         finally:
             painter.restore()
 
@@ -317,7 +242,7 @@ class RemoteFileBrowser(QDialog):
         header = self.table.horizontalHeader()
         header.setHighlightSections(False)
         try:
-            header.setDefaultAlignment(_align_flags(AlignLeft, AlignVCenter))
+            header.setDefaultAlignment(int(_ALIGN_LEFT_VCENTER))
         except Exception:
             pass
         header.setStretchLastSection(False)
@@ -419,18 +344,18 @@ class RemoteFileBrowser(QDialog):
 
             item_name = QTableWidgetItem(name)
             item_name.setData(_item_role(), entry)
-            _align(item_name, AlignLeft, AlignVCenter)
+            _align(item_name, _ALIGN_LEFT_VCENTER)
 
             item_type = QTableWidgetItem(
                 i18n.t("remote_files_type_dir") if is_dir else i18n.t("remote_files_type_file")
             )
-            _align(item_type, AlignLeft, AlignVCenter)
+            _align(item_type, _ALIGN_LEFT_VCENTER)
 
             item_size = QTableWidgetItem(_fmt_size(size, is_dir))
-            _align(item_size, AlignRight, AlignVCenter)
+            _align(item_size, _ALIGN_RIGHT_VCENTER)
 
             item_mtime = QTableWidgetItem(_fmt_mtime(mtime))
-            _align(item_mtime, AlignLeft, AlignVCenter)
+            _align(item_mtime, _ALIGN_LEFT_VCENTER)
 
             self.table.setItem(row, 0, item_name)
             self.table.setItem(row, 1, item_type)
