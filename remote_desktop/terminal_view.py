@@ -47,6 +47,7 @@ from .qt_bind import (
     qt_enum_eq,
     qt_enum_int,
     set_font_families,
+    widget_painter,
 )
 from .themes import CURRENT
 
@@ -169,39 +170,37 @@ class TerminalCanvas(QWidget):
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        bg = QColor(CURRENT.side if hasattr(CURRENT, "side") else "#10181F")
-        # Prefer near-black terminal chrome for contrast.
-        painter.fillRect(self.rect(), QColor("#0E151C"))
-        if self.screen is None:
-            painter.setPen(QColor(CURRENT.text))
-            painter.drawText(
-                self.rect(),
-                qt_enum_int(AlignLeft) | qt_enum_int(AlignTop),
-                "pyte is required for terminal",
-            )
-            return
-        painter.setFont(self._font)
-        painter.setPen(QColor("#D7E2EA"))
-        try:
-            lines = list(self.screen.display)
-        except Exception:
-            lines = []
-        for row, line in enumerate(lines):
-            painter.drawText(0, (row + 1) * self._cell_h - 4, line)
-        if self._cursor_on:
-            try:
-                cx = int(self.screen.cursor.x) * self._cell_w
-                cy = int(self.screen.cursor.y) * self._cell_h
-                painter.fillRect(
-                    cx,
-                    cy,
-                    max(2, self._cell_w // 3),
-                    self._cell_h,
-                    QColor(CURRENT.accent),
+        with widget_painter(self) as painter:
+            painter.fillRect(self.rect(), QColor("#0E151C"))
+            if self.screen is None:
+                painter.setPen(QColor(CURRENT.text))
+                painter.drawText(
+                    self.rect(),
+                    qt_enum_int(AlignLeft) | qt_enum_int(AlignTop),
+                    "pyte is required for terminal",
                 )
+                return
+            painter.setFont(self._font)
+            painter.setPen(QColor("#D7E2EA"))
+            try:
+                lines = list(self.screen.display)
             except Exception:
-                pass
+                lines = []
+            for row, line in enumerate(lines):
+                painter.drawText(0, (row + 1) * self._cell_h - 4, line)
+            if self._cursor_on:
+                try:
+                    cx = int(self.screen.cursor.x) * self._cell_w
+                    cy = int(self.screen.cursor.y) * self._cell_h
+                    painter.fillRect(
+                        cx,
+                        cy,
+                        max(2, self._cell_w // 3),
+                        self._cell_h,
+                        QColor(CURRENT.accent),
+                    )
+                except Exception:
+                    pass
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         payload = _key_bytes(event)
@@ -373,6 +372,8 @@ class _TermBus(QObject):
 class DirectTerminalWindow(QDialog):
     """Standalone SSH-like terminal: connects with role=terminal (no desktop)."""
 
+    session_ack = Signal(object)
+
     def __init__(
         self,
         net: NetConfig,
@@ -435,6 +436,20 @@ class DirectTerminalWindow(QDialog):
         caption = i18n.t("terminal_direct_caption", name=self._title, status=status)
         self._drag.lbl_title.setText(caption)
         self.setWindowTitle(caption)
+
+    def set_display_name(self, name: str) -> None:
+        name = (name or "").strip() or self.net.host
+        self._title = name
+        status = ""
+        if self._drag.lbl_title.text():
+            parts = self._drag.lbl_title.text().split(" · ", 1)
+            if len(parts) > 1:
+                status = parts[-1]
+        if status:
+            self._set_status(status)
+        else:
+            self._drag.lbl_title.setText(i18n.t("terminal_direct_title", name=self._title))
+            self.setWindowTitle(i18n.t("terminal_direct_title", name=self._title))
 
     def start(self) -> None:
         if self._net_thread is not None and self._net_thread.is_alive():
@@ -623,6 +638,10 @@ class DirectTerminalWindow(QDialog):
             features = ack.get("features") or []
             if FEATURE_TERMINAL not in features:
                 raise ProtocolError(i18n.t("terminal_unsupported"))
+            try:
+                self.session_ack.emit(ack)
+            except RuntimeError:
+                pass
 
             session_stop = threading.Event()
             hb = threading.Thread(

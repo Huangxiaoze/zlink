@@ -1121,6 +1121,81 @@ QFrame#headerActionGroup {{
     border: 1px solid {c.line};
     border-radius: 12px;
 }}
+QLabel#connectHint {{
+    color: {c.muted};
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 0 2px;
+}}
+QPushButton#headerSettingsBtn {{
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+}}
+QFrame#headerSearchStrip {{
+    background: {c.card};
+    border: 1px solid {c.line};
+    border-radius: 8px;
+    min-width: 240px;
+    max-width: 380px;
+}}
+QFrame#headerSearchStrip QLineEdit#deviceSearchInput {{
+    min-height: 24px;
+    max-height: 24px;
+    padding: 0 2px;
+    font-size: 12px;
+    border: none;
+    background: transparent;
+}}
+QFrame#headerSearchStrip QLineEdit#deviceSearchInput:focus {{
+    background: transparent;
+}}
+QWidget#headerRightChrome {{
+    background: transparent;
+}}
+QFrame#connectInputStrip {{
+    background: {c.card};
+    border: 1px solid {c.line};
+    border-radius: 10px;
+    max-width: 456px;
+}}
+QPushButton#connectPasswordEye {{
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    min-width: 30px;
+    max-width: 30px;
+}}
+QFrame#connectInputStrip QPushButton#connectPasswordEye:hover {{
+    background: transparent;
+}}
+QLabel#connectDash {{
+    color: {c.muted};
+    font-size: 14px;
+    font-weight: 600;
+    padding: 0 2px;
+    background: transparent;
+}}
+QFrame#connectInputStrip QLineEdit#connectHostInput,
+QFrame#connectInputStrip QLineEdit#connectPasswordInput {{
+    min-height: 32px;
+    max-height: 32px;
+    padding: 4px 8px;
+    font-size: 13px;
+    border: none;
+    background: transparent;
+}}
+QFrame#connectInputStrip QLineEdit#connectHostInput:focus,
+QFrame#connectInputStrip QLineEdit#connectPasswordInput:focus {{
+    background: transparent;
+}}
+QLineEdit#connectHostInput, QLineEdit#connectPasswordInput {{
+    min-height: 34px;
+    padding: 6px 12px;
+    font-size: 13px;
+}}
 QPushButton#headerActionBtn {{
     background: transparent;
     color: {c.muted};

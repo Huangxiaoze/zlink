@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import platform
@@ -26,6 +27,28 @@ def detect_os_label() -> str:
     if system == "Linux":
         return _linux_distro_label()
     return system or ""
+
+
+def remote_username() -> str:
+    """Login / display name of this machine (sent to controllers in HELLO_ACK)."""
+    candidates: list[str] = []
+    try:
+        candidates.append(getpass.getuser())
+    except Exception:
+        pass
+    for key in ("USERNAME", "USER", "LOGNAME"):
+        val = os.environ.get(key)
+        if val:
+            candidates.append(str(val))
+    try:
+        candidates.append(socket.gethostname())
+    except Exception:
+        pass
+    for raw in candidates:
+        name = str(raw or "").strip()
+        if name and name.lower() not in {".", "localhost"}:
+            return name[:64]
+    return "Remote"
 
 
 def _linux_distro_label() -> str:

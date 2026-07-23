@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any
 
 try:
@@ -161,6 +162,10 @@ HoverEnter = _enum(
 HoverLeave = _enum(
     getattr(QEvent, "HoverLeave", None),
     getattr(getattr(QEvent, "Type", None), "HoverLeave", None),
+)
+FocusIn = _enum(
+    getattr(QEvent, "FocusIn", None),
+    getattr(getattr(QEvent, "Type", None), "FocusIn", None),
 )
 WindowStateChange = _enum(
     getattr(QEvent, "WindowStateChange", None),
@@ -350,6 +355,10 @@ Format_RGB32 = _enum(
 Password = _enum(
     getattr(QLineEdit, "Password", None),
     getattr(getattr(QLineEdit, "EchoMode", None), "Password", None),
+)
+Normal = _enum(
+    getattr(QLineEdit, "Normal", None),
+    getattr(getattr(QLineEdit, "EchoMode", None), "Normal", None),
 )
 DialogAccepted = _enum(
     getattr(QDialog, "Accepted", None),
@@ -642,6 +651,17 @@ def qt_key_in(key: Any, *candidates: Any) -> bool:
         if qt_enum_eq(key, candidate):
             return True
     return False
+
+
+@contextmanager
+def widget_painter(widget: Any):
+    """Wrap ``QPainter(widget)`` so ``end()`` runs before ``paintEvent`` returns."""
+    painter = QPainter(widget)
+    try:
+        yield painter
+    finally:
+        if painter.isActive():
+            painter.end()
 
 
 def make_window_flags(*flags: Any) -> Any:

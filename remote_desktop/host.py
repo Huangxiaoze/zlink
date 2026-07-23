@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional
 from . import PROTOCOL_VERSION
 from .capture import ScreenCapturer
 from .config import HostConfig, StreamConfig
-from .devices import detect_os_label
+from .devices import detect_os_label, remote_username
 from .input_io import InputInjector
 from .net import Connection, password_matches, serve_forever
 from .protocol import MsgType, ProtocolError, decode_json, pack_frame_message
@@ -91,6 +91,7 @@ class RemoteHost:
     def _hello_ack(self, conn: Connection, payload: dict[str, Any]) -> None:
         data = dict(payload)
         data.setdefault("os", self._os_label)
+        data.setdefault("username", remote_username())
         conn.send_json(MsgType.HELLO_ACK, data)
 
     def _handle_client(self, conn: Connection, addr: tuple) -> None:

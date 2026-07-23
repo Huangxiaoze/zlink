@@ -98,6 +98,7 @@ from .qt_bind import (
     qt_has_flag,
     qt_key_constants,
     qt_key_in,
+    widget_painter,
 )
 from .win_input_capture import AltTabCapture
 
@@ -157,34 +158,34 @@ class RemoteCanvas(QWidget):
         self.update()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        w, h = self.width(), self.height()
-        if self._source.isNull():
+        with widget_painter(self) as painter:
+            w, h = self.width(), self.height()
+            if self._source.isNull():
+                painter.fillRect(self.rect(), black)
+                return
+
+            src_w, src_h = self._source.width(), self._source.height()
+            if self._scaled.isNull() or self._scaled_for != (w, h):
+                scale = min(float(w) / max(1, src_w), float(h) / max(1, src_h))
+                tw = max(1, int(src_w * scale))
+                th = max(1, int(src_h * scale))
+                if tw == src_w and th == src_h:
+                    self._scaled = self._source
+                elif scale < 1.0:
+                    # Downscale smoothly for anti-aliasing.
+                    painter.setRenderHint(SmoothPixmapTransform, True)
+                    self._scaled = self._source.scaled(tw, th, KeepAspectRatio, SmoothTransformation)
+                else:
+                    # Upscale with nearest-neighbor to keep UI text crisp.
+                    self._scaled = self._source.scaled(tw, th, KeepAspectRatio, FastTransformation)
+                self._scaled_for = (w, h)
+
+            sw, sh = self._scaled.width(), self._scaled.height()
+            x = (w - sw) // 2
+            y = (h - sh) // 2
+            self._blit_rect = (x, y, sw, sh)
             painter.fillRect(self.rect(), black)
-            return
-
-        src_w, src_h = self._source.width(), self._source.height()
-        if self._scaled.isNull() or self._scaled_for != (w, h):
-            scale = min(float(w) / max(1, src_w), float(h) / max(1, src_h))
-            tw = max(1, int(src_w * scale))
-            th = max(1, int(src_h * scale))
-            if tw == src_w and th == src_h:
-                self._scaled = self._source
-            elif scale < 1.0:
-                # Downscale smoothly for anti-aliasing.
-                painter.setRenderHint(SmoothPixmapTransform, True)
-                self._scaled = self._source.scaled(tw, th, KeepAspectRatio, SmoothTransformation)
-            else:
-                # Upscale with nearest-neighbor to keep UI text crisp.
-                self._scaled = self._source.scaled(tw, th, KeepAspectRatio, FastTransformation)
-            self._scaled_for = (w, h)
-
-        sw, sh = self._scaled.width(), self._scaled.height()
-        x = (w - sw) // 2
-        y = (h - sh) // 2
-        self._blit_rect = (x, y, sw, sh)
-        painter.fillRect(self.rect(), black)
-        painter.drawPixmap(x, y, self._scaled)
+            painter.drawPixmap(x, y, self._scaled)
 
     def _norm(self, px: float, py: float) -> Optional[Tuple[float, float]]:
         x, y, w, h = self._blit_rect
@@ -330,44 +331,44 @@ class ViewerExitFullscreenButton(QPushButton):
         super().leaveEvent(event)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.setRenderHint(Antialiasing, True)
-        hovered = bool(self.underMouse())
-        bg = QColor(0, 0, 0, 165 if hovered else 105)
-        border = QColor(255, 255, 255, 100 if hovered else 60)
-        painter.setBrush(bg)
-        painter.setPen(border)
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 15, 15)
+        with widget_painter(self) as painter:
+            painter.setRenderHint(Antialiasing, True)
+            hovered = bool(self.underMouse())
+            bg = QColor(0, 0, 0, 165 if hovered else 105)
+            border = QColor(255, 255, 255, 100 if hovered else 60)
+            painter.setBrush(bg)
+            painter.setPen(border)
+            painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 15, 15)
 
-        # Compact "exit fullscreen" glyph: four corner brackets pointing inward.
-        ink = QColor(255, 255, 255, 235 if hovered else 210)
-        cx = self.width() * 0.5
-        cy = self.height() * 0.5
-        box = 11.0
-        arm = 4.5
-        thick = 2.0
-        left = cx - box * 0.5
-        right = cx + box * 0.5
-        top = cy - box * 0.5
-        bottom = cy + box * 0.5
-        painter.setPen(NoPen)
-        painter.setBrush(ink)
+            # Compact "exit fullscreen" glyph: four corner brackets pointing inward.
+            ink = QColor(255, 255, 255, 235 if hovered else 210)
+            cx = self.width() * 0.5
+            cy = self.height() * 0.5
+            box = 11.0
+            arm = 4.5
+            thick = 2.0
+            left = cx - box * 0.5
+            right = cx + box * 0.5
+            top = cy - box * 0.5
+            bottom = cy + box * 0.5
+            painter.setPen(NoPen)
+            painter.setBrush(ink)
 
-        def bar(x: float, y: float, w: float, h: float) -> None:
-            painter.drawRoundedRect(x, y, w, h, 0.8, 0.8)
+            def bar(x: float, y: float, w: float, h: float) -> None:
+                painter.drawRoundedRect(x, y, w, h, 0.8, 0.8)
 
-        # top-left
-        bar(left, top, arm, thick)
-        bar(left, top, thick, arm)
-        # top-right
-        bar(right - arm, top, arm, thick)
-        bar(right - thick, top, thick, arm)
-        # bottom-left
-        bar(left, bottom - thick, arm, thick)
-        bar(left, bottom - arm, thick, arm)
-        # bottom-right
-        bar(right - arm, bottom - thick, arm, thick)
-        bar(right - thick, bottom - arm, thick, arm)
+            # top-left
+            bar(left, top, arm, thick)
+            bar(left, top, thick, arm)
+            # top-right
+            bar(right - arm, top, arm, thick)
+            bar(right - thick, top, thick, arm)
+            # bottom-left
+            bar(left, bottom - thick, arm, thick)
+            bar(left, bottom - arm, thick, arm)
+            # bottom-right
+            bar(right - arm, bottom - thick, arm, thick)
+            bar(right - thick, bottom - arm, thick, arm)
 
 
 class ViewerChromeBar(QFrame):
@@ -426,6 +427,7 @@ class RemoteClientPage(QWidget):
     """One remote-desktop session page (embedded in ViewerShell tabs)."""
 
     caption_changed = Signal(str)
+    session_ack = Signal(object)
 
     def __init__(
         self,
@@ -527,6 +529,17 @@ class RemoteClientPage(QWidget):
 
     def tab_label(self) -> str:
         return self._tab_label
+
+    def set_display_name(self, name: str) -> None:
+        name = (name or "").strip() or self.config.net.host
+        self._tab_label = self._short_tab_label(name)
+        self._base_title = i18n.t("viewer_title", name=name)
+        shell = self._shell
+        if shell is not None:
+            idx = shell.stack.indexOf(self)
+            if idx >= 0:
+                shell.tab_bar.setTabText(idx, self._tab_label)
+        self.caption_changed.emit(self._base_title)
 
     def isFullScreen(self) -> bool:  # noqa: N802 — match QWidget API used below
         shell = self._shell
@@ -805,6 +818,11 @@ class RemoteClientPage(QWidget):
         features = ack.get("features") or []
         if not isinstance(features, (list, tuple)):
             features = []
+        self._features = set(str(x) for x in features)
+        try:
+            self.session_ack.emit(ack)
+        except RuntimeError:
+            pass
         session_stop = threading.Event()
         self._bus.start_clipboard.emit()
         self._bus.start_file_xfer.emit(list(features))
@@ -1227,34 +1245,34 @@ class ViewerTabCloseButton(QPushButton):
         self.update()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.setRenderHint(Antialiasing, True)
-        cx = self.width() * 0.5
-        cy = self.height() * 0.5
-        if self.isDown():
-            painter.setPen(NoPen)
-            painter.setBrush(QColor(CURRENT.danger))
-            painter.drawEllipse(int(round(cx - 7)), int(round(cy - 7)), 14, 14)
-            ink = QColor(255, 255, 255)
-        elif self.underMouse():
-            painter.setPen(NoPen)
-            painter.setBrush(QColor(CURRENT.btn_hover))
-            painter.drawEllipse(int(round(cx - 7)), int(round(cy - 7)), 14, 14)
-            ink = QColor(CURRENT.text)
-        else:
-            ink = QColor(CURRENT.muted)
-        pen = QPen(ink)
-        pen.setWidthF(1.2)
-        pen.setStyle(SolidLine)
-        pen.setCapStyle(RoundCap)
-        painter.setPen(pen)
-        d = 3.0
-        painter.drawLine(
-            int(round(cx - d)), int(round(cy - d)), int(round(cx + d)), int(round(cy + d))
-        )
-        painter.drawLine(
-            int(round(cx + d)), int(round(cy - d)), int(round(cx - d)), int(round(cy + d))
-        )
+        with widget_painter(self) as painter:
+            painter.setRenderHint(Antialiasing, True)
+            cx = self.width() * 0.5
+            cy = self.height() * 0.5
+            if self.isDown():
+                painter.setPen(NoPen)
+                painter.setBrush(QColor(CURRENT.danger))
+                painter.drawEllipse(int(round(cx - 7)), int(round(cy - 7)), 14, 14)
+                ink = QColor(255, 255, 255)
+            elif self.underMouse():
+                painter.setPen(NoPen)
+                painter.setBrush(QColor(CURRENT.btn_hover))
+                painter.drawEllipse(int(round(cx - 7)), int(round(cy - 7)), 14, 14)
+                ink = QColor(CURRENT.text)
+            else:
+                ink = QColor(CURRENT.muted)
+            pen = QPen(ink)
+            pen.setWidthF(1.2)
+            pen.setStyle(SolidLine)
+            pen.setCapStyle(RoundCap)
+            painter.setPen(pen)
+            d = 3.0
+            painter.drawLine(
+                int(round(cx - d)), int(round(cy - d)), int(round(cx + d)), int(round(cy + d))
+            )
+            painter.drawLine(
+                int(round(cx + d)), int(round(cy - d)), int(round(cx - d)), int(round(cy + d))
+            )
 
 
 class ViewerShell(QMainWindow):

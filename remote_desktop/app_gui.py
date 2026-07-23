@@ -9,17 +9,22 @@ from pathlib import Path
 from .qt_bind import (
     AA_DontShowIconsInMenus,
     AlignCenter,
+    AlignLeft,
+    AlignRight,
+    AlignVCenter,
     Cancel,
     CustomContextMenu,
     DialogAccepted,
     Horizontal,
     HoverEnter,
     HoverLeave,
+    FocusIn,
     LeftButton,
     MouseButtonPress,
     MouseButtonRelease,
     MouseMove,
     NoFocus,
+    Normal,
     Password,
     PointingHandCursor,
     QAction,
@@ -51,6 +56,7 @@ from .qt_bind import (
     menu_exec,
     qt_enum_eq,
     qt_has_flag,
+    qt_enum_int,
 )
 
 from .client import RemoteClientPage, ViewerShell
@@ -72,11 +78,12 @@ from .qt_fonts import apply_app_font, ensure_utf8_stdio
 from .app_icon import apply_app_icon
 from .confirm_dialog import (
     DialogDragBar,
+    HeaderSettingsButton,
+    PasswordEyeButton,
     ICON_CLOSE,
     ICON_MINIMIZE,
     WindowChromeButton,
     ask_confirm,
-    ask_quick_connect,
     make_frameless_dialog,
     show_error,
     show_info,
@@ -150,6 +157,31 @@ class _WindowDragFilter(QObject):
             return False
         if qt_enum_eq(et, MouseButtonRelease):
             self._drag_offset = None
+            return False
+        return False
+
+
+class _DeviceCardSelectionFilter(QObject):
+    """Drop the accent selection ring when focus or clicks leave device cards."""
+
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window)
+        self._window = window
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        et = event.type()
+        if not isinstance(obj, QWidget):
+            return False
+        if qt_enum_eq(et, MouseButtonPress):
+            if not self._window._widget_is_device_card(obj):
+                self._window._clear_card_selection()
+            return False
+        if qt_enum_eq(et, FocusIn):
+            app = QApplication.instance()
+            if app is not None and app.activePopupWidget() is not None:
+                return False
+            if not self._window._widget_is_device_card(obj):
+                self._window._clear_card_selection()
             return False
         return False
 
@@ -285,7 +317,6 @@ class DeviceCard(QFrame):
         self.update()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        self.selected.emit(self.device_id)
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
@@ -316,10 +347,31 @@ class DeviceDialog(QDialog):
         self.host = QLineEdit(device.host if device else "")
         self.password = QLineEdit(device.password if device else "")
         self.password.setEchoMode(Password)
+        self.password.setObjectName("confirmInput")
+        pwd_wrap = QWidget()
+        pwd_l = QVBoxLayout(pwd_wrap)
+        pwd_l.setContentsMargins(0, 0, 0, 0)
+        pwd_l.setSpacing(6)
+        pwd_l.addWidget(self.password)
+        show_row = QHBoxLayout()
+        show_row.setContentsMargins(0, 0, 0, 0)
+        show_row.setSpacing(8)
+        show_row.addStretch(1)
+        self.lbl_show_pwd = QLabel(i18n.t("show_code"))
+        self.lbl_show_pwd.setObjectName("confirmCheck")
+        self.lbl_show_pwd.setCursor(PointingHandCursor)
+        self.chk_show_pwd = ToggleSwitch()
+        self.chk_show_pwd.toggled.connect(self._on_show_password_toggled)
+        self.lbl_show_pwd.mousePressEvent = (  # type: ignore[method-assign]
+            lambda event: self.chk_show_pwd.toggle()
+        )
+        show_row.addWidget(self.lbl_show_pwd, 0)
+        show_row.addWidget(self.chk_show_pwd, 0)
+        pwd_l.addLayout(show_row)
         self.notes = QLineEdit(device.notes if device else "")
         form.addRow(i18n.t("field_name"), self.name)
         form.addRow(i18n.t("field_host"), self.host)
-        form.addRow(i18n.t("field_password"), self.password)
+        form.addRow(i18n.t("field_password"), pwd_wrap)
         form.addRow(i18n.t("field_notes"), self.notes)
 
         buttons = make_dialog_button_box(Save, Cancel)
@@ -330,6 +382,14 @@ class DeviceDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
         root.addWidget(form_host)
+
+    def _on_show_password_toggled(self, _checked: bool = False) -> None:
+        if self.chk_show_pwd.isChecked():
+            self.password.setEchoMode(Normal)
+            self.lbl_show_pwd.setText(i18n.t("hide_code"))
+        else:
+            self.password.setEchoMode(Password)
+            self.lbl_show_pwd.setText(i18n.t("show_code"))
 
     def _ok(self) -> None:
         host = self.host.text().strip()
@@ -670,69 +730,114 @@ class MainWindow(QMainWindow):
 
         header = QHBoxLayout()
         header.setSpacing(10)
+        header.setContentsMargins(0, 0, 0, 0)
+        vcenter = qt_enum_int(AlignVCenter)
+        align_left = qt_enum_int(AlignLeft) | vcenter
+        align_right = qt_enum_int(AlignRight) | vcenter
+
         self.lbl_list_title = QLabel()
         self.lbl_list_title.setObjectName("pageTitle")
         self.lbl_list_title.installEventFilter(self._drag_filter)
-        header.addWidget(self.lbl_list_title, 1)
+        header.addWidget(self.lbl_list_title, 1, align_left)
 
-        # Soft segmented action cluster — less noisy than four heavy default buttons.
-        action_group = QFrame()
-        action_group.setObjectName("headerActionGroup")
-        action_l = QHBoxLayout(action_group)
-        action_l.setContentsMargins(4, 3, 4, 3)
-        action_l.setSpacing(2)
+        search_strip = QFrame()
+        search_strip.setObjectName("headerSearchStrip")
+        search_l = QHBoxLayout(search_strip)
+        search_l.setContentsMargins(8, 2, 8, 2)
+        search_l.setSpacing(0)
+        self.search = QLineEdit()
+        self.search.setObjectName("deviceSearchInput")
+        self.search.setMinimumWidth(220)
+        self.search.setMaximumWidth(360)
+        self.search.textChanged.connect(self._reload_devices)
+        search_l.addWidget(self.search, 1)
+        header.addWidget(search_strip, 0, vcenter)
 
-        self.btn_add = QPushButton()
-        self.btn_probe = QPushButton()
-        self.btn_quick = QPushButton()
-        self.btn_settings = QPushButton()
-        self.btn_add.setObjectName("headerActionPrimary")
-        for btn in (self.btn_probe, self.btn_quick, self.btn_settings):
-            btn.setObjectName("headerActionBtn")
-        for btn in (self.btn_add, self.btn_probe, self.btn_quick, self.btn_settings):
-            btn.setCursor(PointingHandCursor)
-            btn.setFocusPolicy(NoFocus)
-            btn.setFlat(True)
-        self.btn_add.clicked.connect(self._add_device)
-        self.btn_probe.clicked.connect(self._probe_now)
-        self.btn_quick.clicked.connect(self._quick_connect)
+        header_right = QWidget()
+        header_right.setObjectName("headerRightChrome")
+        right_l = QHBoxLayout(header_right)
+        right_l.setContentsMargins(0, 0, 0, 0)
+        right_l.setSpacing(4)
+        right_l.addStretch(1)
+
+        self.btn_settings = HeaderSettingsButton(self)
         self.btn_settings.clicked.connect(self._open_settings)
-        action_l.addWidget(self.btn_add)
-        action_l.addWidget(self.btn_probe)
-        action_l.addWidget(self.btn_quick)
-        action_l.addWidget(self.btn_settings)
-        header.addWidget(action_group, 0)
+        right_l.addWidget(self.btn_settings, 0, vcenter)
 
         chrome_wrap = QWidget()
         chrome_l = QHBoxLayout(chrome_wrap)
         chrome_l.setContentsMargins(4, 0, 0, 0)
         chrome_l.setSpacing(2)
+
         self.btn_win_min = WindowChromeButton(
             ICON_MINIMIZE, self, object_name="windowChromeBtn", width=32, height=28
         )
         self.btn_win_min.setToolTip(i18n.t("window_minimize"))
         self.btn_win_min.clicked.connect(self.showMinimized)
+        chrome_l.addWidget(self.btn_win_min, 0)
+
         self.btn_win_close = WindowChromeButton(
             ICON_CLOSE, self, object_name="windowCloseBtn", width=36, height=28
         )
         self.btn_win_close.setToolTip(i18n.t("close_action"))
         self.btn_win_close.clicked.connect(self.close)
-        chrome_l.addWidget(self.btn_win_min, 0)
         chrome_l.addWidget(self.btn_win_close, 0)
-        header.addWidget(chrome_wrap, 0)
+        right_l.addWidget(chrome_wrap, 0, vcenter)
 
-        search_row = QHBoxLayout()
-        self.lbl_search = QLabel()
-        self.lbl_search.setObjectName("pageMuted")
-        self.search = QLineEdit()
-        self.search.textChanged.connect(self._reload_devices)
-        search_row.addWidget(self.lbl_search)
-        search_row.addWidget(self.search, 1)
+        header.addWidget(header_right, 1, align_right)
+
+        connect_block = QVBoxLayout()
+        connect_block.setSpacing(6)
+        self.lbl_connect_hint = QLabel()
+        self.lbl_connect_hint.setObjectName("connectHint")
+        self.lbl_connect_hint.setWordWrap(True)
+        connect_block.addWidget(self.lbl_connect_hint)
+
+        connect_row = QHBoxLayout()
+        connect_row.setSpacing(10)
+        self.connect_host = QLineEdit()
+        self.connect_host.setObjectName("connectHostInput")
+        self.connect_host.setMinimumWidth(108)
+        self.connect_host.setMaximumWidth(168)
+        self.connect_password = QLineEdit()
+        self.connect_password.setObjectName("connectPasswordInput")
+        self.connect_password.setEchoMode(Password)
+        self.connect_password.setMinimumWidth(108)
+        self.connect_password.setMaximumWidth(176)
+        self.connect_password.returnPressed.connect(lambda: self._connect_from_bar("desktop"))
+        self.btn_connect_password_eye = PasswordEyeButton(self.connect_password)
+
+        self.lbl_connect_dash = QLabel("—")
+        self.lbl_connect_dash.setObjectName("connectDash")
+        self.lbl_connect_dash.setAlignment(AlignCenter)
+        self.lbl_connect_dash.setFixedWidth(22)
+
+        connect_strip = QFrame()
+        connect_strip.setObjectName("connectInputStrip")
+        strip_l = QHBoxLayout(connect_strip)
+        strip_l.setContentsMargins(4, 2, 4, 2)
+        strip_l.setSpacing(0)
+        strip_l.addWidget(self.connect_host, 0)
+        strip_l.addWidget(self.lbl_connect_dash, 0)
+        strip_l.addWidget(self.connect_password, 0)
+        strip_l.addWidget(self.btn_connect_password_eye, 0)
+
+        self.btn_connect = QPushButton()
+        self.btn_connect.setObjectName("headerActionPrimary")
+        self.btn_connect.setCursor(PointingHandCursor)
+        self.btn_connect.setFocusPolicy(NoFocus)
+        self.btn_connect.setFlat(True)
+        self.btn_connect.clicked.connect(lambda: self._connect_from_bar("desktop"))
+        connect_row.addWidget(connect_strip, 0)
+        connect_row.addWidget(self.btn_connect, 0)
+        connect_row.addStretch(1)
+        connect_block.addLayout(connect_row)
 
         list_card = QFrame()
         list_card.setObjectName("mainCard")
         list_l = QVBoxLayout(list_card)
         list_l.setContentsMargins(12, 12, 12, 12)
+        list_l.setSpacing(10)
 
         self.device_scroll = QScrollArea()
         self.device_scroll.setObjectName("deviceScroll")
@@ -781,7 +886,7 @@ class MainWindow(QMainWindow):
         footer.addWidget(self.lbl_card_hint, 0)
 
         main_l.addLayout(header)
-        main_l.addLayout(search_row)
+        main_l.addLayout(connect_block)
         main_l.addWidget(list_card, 1)
         main_l.addLayout(footer)
 
@@ -789,6 +894,11 @@ class MainWindow(QMainWindow):
         splitter.addWidget(main)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 800])
+
+        self._card_selection_filter = _DeviceCardSelectionFilter(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self._card_selection_filter)
 
     def _setup_tray(self) -> None:
         """Windows tray / Ubuntu top-panel StatusNotifier icon."""
@@ -838,15 +948,15 @@ class MainWindow(QMainWindow):
             self.lbl_host_state.setText(i18n.t("host_on", port=DEFAULT_PORT))
             self._restyle(self.lbl_host_state, "hostOk")
         self.lbl_list_title.setText(i18n.t("device_list"))
-        self.btn_add.setText(i18n.t("add_device"))
-        self.btn_probe.setText(i18n.t("refresh_status"))
-        self.btn_quick.setText(i18n.t("quick_connect"))
-        self.btn_settings.setText(i18n.t("settings"))
-        self.btn_add.setToolTip(i18n.t("add_device"))
-        self.btn_probe.setToolTip(i18n.t("refresh_status"))
-        self.btn_quick.setToolTip(i18n.t("quick_connect"))
         self.btn_settings.setToolTip(i18n.t("settings"))
-        self.lbl_search.setText(i18n.t("search"))
+        self.lbl_connect_hint.setText(i18n.t("connect_bar_hint"))
+        self.connect_host.setPlaceholderText(i18n.t("connect_host_ph"))
+        self.connect_password.setPlaceholderText(i18n.t("connect_password_ph"))
+        self.btn_connect.setText(i18n.t("connect_action"))
+        self.btn_connect.setToolTip(i18n.t("connect_bar_hint"))
+        eye = getattr(self, "btn_connect_password_eye", None)
+        if eye is not None and hasattr(eye, "retranslate"):
+            eye.retranslate()
         self.search.setPlaceholderText(i18n.t("search_ph"))
         self._refresh_local()
         self._reload_devices()
@@ -985,6 +1095,25 @@ class MainWindow(QMainWindow):
             self._card_hover_count = max(0, self._card_hover_count - 1)
         self._update_card_hint()
 
+    def _widget_is_device_card(self, widget: QWidget) -> bool:
+        w: QWidget | None = widget
+        while w is not None:
+            if isinstance(w, DeviceCard):
+                return True
+            if w is self:
+                break
+            w = w.parentWidget()
+        return False
+
+    def _clear_card_selection(self) -> None:
+        if self._selected_device_id is None and not any(
+            c.property("selected") for c in self._device_cards.values()
+        ):
+            return
+        self._selected_device_id = None
+        for card in self._device_cards.values():
+            card.set_selected(False)
+
     def _on_card_selected(self, device_id: str) -> None:
         self._selected_device_id = device_id
         for did, card in self._device_cards.items():
@@ -1082,7 +1211,6 @@ class MainWindow(QMainWindow):
         # Force every themed widget to drop stale inline colors.
         self.retranslate()
         self._restyle(self.status, "statusBar")
-        self._restyle(self.lbl_search, "pageMuted")
         apply_window_chrome(self, THEME)
         if self._viewer_shell is not None:
             try:
@@ -1377,21 +1505,71 @@ class MainWindow(QMainWindow):
         self._restyle(self.lbl_host_state, "hostDanger")
         show_error(self, title=i18n.t("error"), message=i18n.t("host_crash_msg"))
 
-    def _quick_connect(self) -> None:
-        result = ask_quick_connect(self)
-        if not result:
+    def _find_device_by_host(self, host: str, port: int) -> Device | None:
+        host_key = host.strip().lower()
+        port_key = int(port)
+        for device in self.store.devices:
+            if device.host.strip().lower() == host_key and int(device.port) == port_key:
+                return device
+        return None
+
+    def _apply_peer_ack(
+        self,
+        device_id: str | None,
+        host: str,
+        ack: dict,
+        page: RemoteClientPage | None = None,
+        terminal: DirectTerminalWindow | None = None,
+    ) -> None:
+        if not device_id:
             return
-        host, password, save, mode = result
-        device_id = None
-        if save:
+        device = self.store.get(device_id)
+        if device is None:
+            return
+        username = str(ack.get("username") or "").strip()
+        os_name = str(ack.get("os") or "").strip()
+        host_key = host.strip().lower()
+        changed = False
+        if username and (
+            device.name.strip().lower() == host_key
+            or device.name.strip() == device.host.strip()
+        ):
+            device.name = username
+            changed = True
+        if os_name and os_name != device.os_name:
+            device.os_name = os_name
+            changed = True
+        if changed:
+            self.store.upsert(device)
+            self._reload_devices()
+        if page is not None and username:
+            page.set_display_name(username)
+        if terminal is not None and username:
+            terminal.set_display_name(username)
+
+    def _connect_from_bar(self, mode: str = "desktop") -> None:
+        host = self.connect_host.text().strip()
+        if not host:
+            show_warning(self, title=i18n.t("tip"), message=i18n.t("fill_host"))
+            return
+        password = self.connect_password.text()
+        existing = self._find_device_by_host(host, DEFAULT_PORT)
+        if existing is not None:
+            existing.password = password
+            self.store.upsert(existing)
+            device_id = existing.id
+            display_title = existing.name
+        else:
             device = Device.create(name=host, host=host, password=password)
             self.store.upsert(device)
             device_id = device.id
-            self._reload_devices()
+            display_title = host
+        self._reload_devices()
         if mode == "terminal":
-            self._launch_terminal(host, DEFAULT_PORT, password, host, device_id)
+            self._launch_terminal(host, DEFAULT_PORT, password, display_title, device_id)
         else:
-            self._launch_client(host, DEFAULT_PORT, password, host, device_id)
+            self._launch_client(host, DEFAULT_PORT, password, display_title, device_id)
+
 
     def _ensure_viewer_shell(self) -> ViewerShell:
         shell = self._viewer_shell
@@ -1490,6 +1668,9 @@ class MainWindow(QMainWindow):
         shell = self._ensure_viewer_shell()
         try:
             page = shell.add_session(cfg, device_id=device_id)
+            page.session_ack.connect(
+                lambda ack, did=device_id, h=host, p=page: self._apply_peer_ack(did, h, ack, p)
+            )
             shell.focus_page(page)
         except RuntimeError:
             self._viewer_shell = None
@@ -1566,6 +1747,11 @@ class MainWindow(QMainWindow):
             return
         win.device_id = device_id
         win.setAttribute(WA_DeleteOnClose, True)
+        win.session_ack.connect(
+            lambda ack, did=device_id, h=host, w=win: self._apply_peer_ack(
+                did, h, ack, terminal=w
+            )
+        )
         self._terminals.append(win)
 
         def _drop(*_: object, window: DirectTerminalWindow = win) -> None:

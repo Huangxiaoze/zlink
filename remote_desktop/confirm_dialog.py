@@ -14,6 +14,7 @@ from .qt_bind import (
     MiterJoin,
     NoFocus,
     NoPen,
+    Normal,
     Password,
     PointingHandCursor,
     QCheckBox,
@@ -38,6 +39,7 @@ from .qt_bind import (
     make_window_flags,
     qt_enum_eq,
     qt_has_flag,
+    widget_painter,
 )
 from .themes import CURRENT
 from .toggle_switch import ToggleSwitch
@@ -231,6 +233,130 @@ class WindowChromeButton(QPushButton):
         else:
             ink = QColor(CURRENT.muted)
         _draw_chrome_icon(painter, self._kind, self.width() * 0.5, self.height() * 0.5, ink)
+
+
+class HeaderSettingsButton(QPushButton):
+    """Main-window settings control: soft tile + sliders icon (Fluent-style)."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("headerSettingsBtn")
+        self.setText("")
+        self.setCursor(PointingHandCursor)
+        self.setFocusPolicy(NoFocus)
+        self.setFlat(True)
+        self.setFixedSize(32, 32)
+        self.setToolTip(i18n.t("settings"))
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        with widget_painter(self) as painter:
+            painter.setRenderHint(Antialiasing, True)
+            rect = self.rect().adjusted(3, 3, -3, -3)
+            hovered = self.underMouse()
+            pressed = self.isDown()
+            if pressed:
+                fill = QColor(CURRENT.btn_pressed)
+                border = QColor(CURRENT.line)
+                ink = QColor(CURRENT.accent_2 if hasattr(CURRENT, "accent_2") else CURRENT.accent)
+            elif hovered:
+                fill = QColor(CURRENT.btn_hover)
+                border = QColor(CURRENT.line)
+                ink = QColor(CURRENT.accent)
+            else:
+                fill = QColor(getattr(CURRENT, "card", CURRENT.bg))
+                border = QColor(CURRENT.line)
+                ink = QColor(CURRENT.muted)
+            painter.setPen(QPen(border, 1.0))
+            painter.setBrush(fill)
+            painter.drawRoundedRect(rect, 8, 8)
+
+            cx = self.width() * 0.5
+            cy = self.height() * 0.5
+            track_w = 12.0
+            x0 = cx - track_w * 0.5
+            x1 = cx + track_w * 0.5
+            knob_r = 2.0
+            sliders = ((cy - 4.0, 0.68), (cy, 0.34), (cy + 4.0, 0.52))
+            track_pen = QPen(ink, 1.25, SolidLine, RoundCap, RoundJoin)
+            painter.setPen(track_pen)
+            for y, t in sliders:
+                painter.drawLine(int(round(x0)), int(round(y)), int(round(x1)), int(round(y)))
+                kx = x0 + track_w * t
+                painter.setPen(NoPen)
+                painter.setBrush(ink)
+                painter.drawEllipse(
+                    int(round(kx - knob_r)),
+                    int(round(y - knob_r)),
+                    int(round(knob_r * 2)),
+                    int(round(knob_r * 2)),
+                )
+                painter.setPen(track_pen)
+
+
+def _draw_password_eye(painter: QPainter, cx: float, cy: float, color: QColor, *, visible: bool) -> None:
+    """Minimal eye / eye-off for password reveal controls."""
+    painter.setPen(_stroke_pen(color, 1.35, round_caps=True))
+    painter.setBrush(QColor(0, 0, 0, 0))
+    painter.drawEllipse(int(round(cx - 7)), int(round(cy - 4.5)), 14, 9)
+    if visible:
+        painter.setBrush(color)
+        painter.drawEllipse(int(round(cx - 2.2)), int(round(cy - 2.2)), 5, 5)
+    else:
+        painter.drawLine(int(round(cx - 8)), int(round(cy + 5)), int(round(cx + 8)), int(round(cy - 5)))
+
+
+class PasswordEyeButton(QPushButton):
+    """Toggle plain-text visibility for a paired QLineEdit."""
+
+    def __init__(self, target: QLineEdit, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._target = target
+        self._revealed = False
+        self.setObjectName("connectPasswordEye")
+        self.setText("")
+        self.setCursor(PointingHandCursor)
+        self.setFocusPolicy(NoFocus)
+        self.setFlat(True)
+        self.setFixedSize(30, 30)
+        self.setToolTip(i18n.t("show_password"))
+        self.clicked.connect(self._toggle)
+
+    def _toggle(self) -> None:
+        self._revealed = not self._revealed
+        self._target.setEchoMode(Normal if self._revealed else Password)
+        self.setToolTip(i18n.t("hide_password" if self._revealed else "show_password"))
+        self.update()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        with widget_painter(self) as painter:
+            painter.setRenderHint(Antialiasing, True)
+            if self.underMouse() or self.isDown():
+                painter.setPen(NoPen)
+                painter.setBrush(QColor(CURRENT.btn_hover))
+                painter.drawEllipse(self.rect().adjusted(3, 3, -3, -3))
+                ink = QColor(CURRENT.accent)
+            else:
+                ink = QColor(CURRENT.muted)
+            _draw_password_eye(painter, self.width() * 0.5, self.height() * 0.5, ink, visible=self._revealed)
+
+    def retranslate(self) -> None:
+        self.setToolTip(i18n.t("hide_password" if self._revealed else "show_password"))
 
 
 def _make_frameless(
