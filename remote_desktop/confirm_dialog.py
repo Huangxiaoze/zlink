@@ -11,8 +11,8 @@ from .qt_bind import (
     DialogWindow,
     FramelessWindowHint,
     LeftButton,
+    MiterJoin,
     NoFocus,
-    NoPen,
     Password,
     PointingHandCursor,
     QCheckBox,
@@ -23,7 +23,12 @@ from .qt_bind import (
     QLabel,
     QLineEdit,
     QPainter,
+    QPen,
     QPushButton,
+    RoundCap,
+    RoundJoin,
+    SolidLine,
+    SquareCap,
     QVBoxLayout,
     QWidget,
     WA_StyledBackground,
@@ -60,79 +65,90 @@ def _global_pos(event):
     return event.globalPos()
 
 
-def _bar(painter: QPainter, x: float, y: float, w: float, h: float) -> None:
-    painter.drawRoundedRect(x, y, w, h, 0.7, 0.7)
+def _stroke_pen(color: QColor, width: float = 1.35, *, round_caps: bool = True) -> QPen:
+    pen = QPen(color)
+    pen.setWidthF(float(width))
+    pen.setStyle(SolidLine)
+    pen.setCapStyle(RoundCap if round_caps else SquareCap)
+    pen.setJoinStyle(RoundJoin if round_caps else MiterJoin)
+    return pen
 
 
 def _draw_chrome_icon(painter: QPainter, kind: str, cx: float, cy: float, color: QColor) -> None:
-    painter.setPen(NoPen)
-    painter.setBrush(color)
-    t = 1.8
+    """Fluent / Win11-like caption glyphs: thin strokes, no chunky blocks."""
+    painter.setBrush(QColor(0, 0, 0, 0))
 
     if kind == ICON_MINIMIZE:
-        _bar(painter, cx - 5.5, cy - t * 0.5, 11.0, t)
+        painter.setPen(_stroke_pen(color, 1.5, round_caps=True))
+        y = int(round(cy))
+        painter.drawLine(int(round(cx - 5)), y, int(round(cx + 5)), y)
         return
 
     if kind == ICON_MAXIMIZE:
-        left, top, size = cx - 5.0, cy - 5.0, 10.0
-        _bar(painter, left, top, size, t)
-        _bar(painter, left, top + size - t, size, t)
-        _bar(painter, left, top, t, size)
-        _bar(painter, left + size - t, top, t, size)
+        # Clean hollow square (standard maximize).
+        painter.setPen(_stroke_pen(color, 1.3, round_caps=False))
+        side = 10
+        x = int(round(cx - side * 0.5))
+        y = int(round(cy - side * 0.5))
+        painter.drawRect(x, y, side, side)
         return
 
     if kind == ICON_RESTORE:
-        # Back square
-        _bar(painter, cx - 2.0, cy - 5.5, 8.0, t)
-        _bar(painter, cx - 2.0 + 8.0 - t, cy - 5.5, t, 8.0)
-        _bar(painter, cx - 2.0, cy - 5.5, t, 3.0)
-        _bar(painter, cx - 2.0 + 5.0, cy - 5.5 + 8.0 - t, 3.0, t)
-        # Front square
-        left, top, size = cx - 5.5, cy - 2.5, 8.0
-        _bar(painter, left, top, size, t)
-        _bar(painter, left, top + size - t, size, t)
-        _bar(painter, left, top, t, size)
-        _bar(painter, left + size - t, top, t, size)
+        # Overlapping squares — only draw the visible edges of the back square.
+        painter.setPen(_stroke_pen(color, 1.25, round_caps=False))
+        back = 7
+        front = 8
+        bx = int(round(cx - 1.5))
+        by = int(round(cy - 5.0))
+        fx = int(round(cx - 5.0))
+        fy = int(round(cy - 1.5))
+        # Back: top + right edges only (avoids a messy double box).
+        painter.drawLine(bx, by, bx + back, by)
+        painter.drawLine(bx + back, by, bx + back, by + back)
+        painter.drawLine(bx + 3, by + back, bx + back, by + back)
+        # Front square on top.
+        painter.drawRect(fx, fy, front, front)
         return
 
     if kind == ICON_CLOSE:
-        painter.save()
-        painter.translate(cx, cy)
-        painter.rotate(45)
-        _bar(painter, -5.5, -t * 0.5, 11.0, t)
-        painter.rotate(90)
-        _bar(painter, -5.5, -t * 0.5, 11.0, t)
-        painter.restore()
+        # Crisp X with round caps.
+        painter.setPen(_stroke_pen(color, 1.4, round_caps=True))
+        d = 4.6
+        x0, y0 = int(round(cx - d)), int(round(cy - d))
+        x1, y1 = int(round(cx + d)), int(round(cy + d))
+        painter.drawLine(x0, y0, x1, y1)
+        painter.drawLine(x1, y0, x0, y1)
         return
 
     if kind in (ICON_FULLSCREEN, ICON_EXIT_FULLSCREEN):
-        box = 11.0
-        arm = 4.2
+        painter.setPen(_stroke_pen(color, 1.35, round_caps=True))
+        box = 10.0
+        arm = 3.6
         left = cx - box * 0.5
         right = cx + box * 0.5
         top = cy - box * 0.5
         bottom = cy + box * 0.5
         if kind == ICON_FULLSCREEN:
-            # Corners at outer edges (expand).
-            _bar(painter, left, top, arm, t)
-            _bar(painter, left, top, t, arm)
-            _bar(painter, right - arm, top, arm, t)
-            _bar(painter, right - t, top, t, arm)
-            _bar(painter, left, bottom - t, arm, t)
-            _bar(painter, left, bottom - arm, t, arm)
-            _bar(painter, right - arm, bottom - t, arm, t)
-            _bar(painter, right - t, bottom - arm, t, arm)
+            # Expand: corners open outward.
+            painter.drawLine(int(left), int(top + arm), int(left), int(top))
+            painter.drawLine(int(left), int(top), int(left + arm), int(top))
+            painter.drawLine(int(right - arm), int(top), int(right), int(top))
+            painter.drawLine(int(right), int(top), int(right), int(top + arm))
+            painter.drawLine(int(left), int(bottom - arm), int(left), int(bottom))
+            painter.drawLine(int(left), int(bottom), int(left + arm), int(bottom))
+            painter.drawLine(int(right - arm), int(bottom), int(right), int(bottom))
+            painter.drawLine(int(right), int(bottom), int(right), int(bottom - arm))
         else:
-            # Corners pulled inward (collapse).
-            inset = 2.2
-            _bar(painter, left + inset, top + inset, arm, t)
-            _bar(painter, left + inset, top + inset, t, arm)
-            _bar(painter, right - inset - arm, top + inset, arm, t)
-            _bar(painter, right - inset - t, top + inset, t, arm)
-            _bar(painter, left + inset, bottom - inset - t, arm, t)
-            _bar(painter, left + inset, bottom - inset - arm, t, arm)
-            _bar(painter, right - inset - arm, bottom - inset - t, arm, t)
-            _bar(painter, right - inset - t, bottom - inset - arm, t, arm)
+            # Collapse: corners point inward.
+            inset = 2.0
+            painter.drawLine(int(left + inset), int(top + inset + arm), int(left + inset), int(top + inset))
+            painter.drawLine(int(left + inset), int(top + inset), int(left + inset + arm), int(top + inset))
+            painter.drawLine(int(right - inset - arm), int(top + inset), int(right - inset), int(top + inset))
+            painter.drawLine(int(right - inset), int(top + inset), int(right - inset), int(top + inset + arm))
+            painter.drawLine(int(left + inset), int(bottom - inset - arm), int(left + inset), int(bottom - inset))
+            painter.drawLine(int(left + inset), int(bottom - inset), int(left + inset + arm), int(bottom - inset))
+            painter.drawLine(int(right - inset - arm), int(bottom - inset), int(right - inset), int(bottom - inset))
+            painter.drawLine(int(right - inset), int(bottom - inset), int(right - inset), int(bottom - inset - arm))
         return
 
 
@@ -169,8 +185,15 @@ class WindowChromeButton(QPushButton):
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
         painter = QPainter(self)
-        painter.setRenderHint(Antialiasing, True)
-        ink = QColor(CURRENT.text if self.underMouse() else CURRENT.muted)
+        # Squares look sharper without AA; lines/X prefer AA.
+        use_aa = self._kind not in (ICON_MAXIMIZE, ICON_RESTORE)
+        painter.setRenderHint(Antialiasing, use_aa)
+        if self._kind == ICON_CLOSE and self.underMouse():
+            ink = QColor(CURRENT.danger)
+        elif self.underMouse():
+            ink = QColor(CURRENT.text)
+        else:
+            ink = QColor(CURRENT.muted)
         _draw_chrome_icon(painter, self._kind, self.width() * 0.5, self.height() * 0.5, ink)
 
 

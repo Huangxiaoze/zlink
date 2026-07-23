@@ -20,6 +20,7 @@ try:
         QKeySequence,
         QMouseEvent,
         QPainter,
+        QPen,
         QPixmap,
         QWheelEvent,
     )
@@ -75,6 +76,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QKeySequence,
         QMouseEvent,
         QPainter,
+        QPen,
         QPixmap,
         QShortcut,
         QWheelEvent,
@@ -294,6 +296,26 @@ Antialiasing = _enum(
 NoPen = _enum(
     getattr(Qt, "NoPen", None),
     getattr(getattr(Qt, "PenStyle", None), "NoPen", None),
+)
+SolidLine = _enum(
+    getattr(Qt, "SolidLine", None),
+    getattr(getattr(Qt, "PenStyle", None), "SolidLine", None),
+)
+RoundCap = _enum(
+    getattr(Qt, "RoundCap", None),
+    getattr(getattr(Qt, "PenCapStyle", None), "RoundCap", None),
+)
+SquareCap = _enum(
+    getattr(Qt, "SquareCap", None),
+    getattr(getattr(Qt, "PenCapStyle", None), "SquareCap", None),
+)
+MiterJoin = _enum(
+    getattr(Qt, "MiterJoin", None),
+    getattr(getattr(Qt, "PenJoinStyle", None), "MiterJoin", None),
+)
+RoundJoin = _enum(
+    getattr(Qt, "RoundJoin", None),
+    getattr(getattr(Qt, "PenJoinStyle", None), "RoundJoin", None),
 )
 Format_RGB32 = _enum(
     getattr(QImage, "Format_RGB32", None),
