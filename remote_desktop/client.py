@@ -539,6 +539,7 @@ class RemoteClientPage(QWidget):
             idx = shell.stack.indexOf(self)
             if idx >= 0:
                 shell.tab_bar.setTabText(idx, self._tab_label)
+                shell.tab_bar.setTabToolTip(idx, self._base_title)
         self.caption_changed.emit(self._base_title)
 
     def isFullScreen(self) -> bool:  # noqa: N802 — match QWidget API used below
@@ -1473,7 +1474,7 @@ class ViewerShell(QMainWindow):
         idx = self.tab_bar.currentIndex()
         page = self.stack.currentWidget()
         if isinstance(page, RemoteClientPage) and idx >= 0:
-            caption = self.tab_bar.tabToolTip(idx) or page.tab_label()
+            caption = page.tab_label() or self.tab_bar.tabToolTip(idx) or page._base_title
         elif self.stack.count() <= 1:
             caption = i18n.t("viewer_shell_title")
         else:

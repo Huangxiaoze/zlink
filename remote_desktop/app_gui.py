@@ -1574,10 +1574,23 @@ class MainWindow(QMainWindow):
         if changed:
             self.store.upsert(device)
             self._reload_devices()
-        if page is not None and username:
-            page.set_display_name(username)
-        if terminal is not None and username:
-            terminal.set_display_name(username)
+        display_name = (device.name or "").strip() or (device.host or "").strip()
+        if page is not None and display_name:
+            page.set_display_name(display_name)
+        if terminal is not None and display_name:
+            terminal.set_display_name(display_name)
+
+    def _device_display_name(self, device_id: str | None, fallback: str = "") -> str:
+        if device_id:
+            device = self.store.get(device_id)
+            if device is not None:
+                name = (device.name or "").strip()
+                if name:
+                    return name
+                host = (device.host or "").strip()
+                if host:
+                    return host
+        return (fallback or "").strip()
 
     def _connect_from_bar(self, mode: str = "desktop") -> None:
         host = self.connect_host.text().strip()
@@ -1678,8 +1691,10 @@ class MainWindow(QMainWindow):
         title: str,
         device_id: str | None,
     ) -> None:
+        title = self._device_display_name(device_id, title)
         existing = self._find_viewer(host, port, device_id)
         if existing is not None:
+            existing.set_display_name(title)
             self._focus_viewer(existing, title)
             if device_id:
                 self.store.touch_connected(device_id)
@@ -1757,8 +1772,10 @@ class MainWindow(QMainWindow):
         title: str,
         device_id: str | None,
     ) -> None:
+        title = self._device_display_name(device_id, title)
         existing = self._find_terminal(host, port, device_id)
         if existing is not None:
+            existing.set_display_name(title)
             self._focus_terminal(existing, title)
             if device_id:
                 self.store.touch_connected(device_id)
