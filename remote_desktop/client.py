@@ -35,6 +35,7 @@ from .protocol import MsgType, ProtocolError, decode_json, unpack_file_message, 
 from .qt_bind import (
     AltModifier,
     Antialiasing,
+    ApplicationActive,
     ControlModifier,
     ElideRight,
     FastTransformation,
@@ -87,14 +88,18 @@ from .qt_bind import (
     WA_NoSystemBackground,
     WA_OpaquePaintEvent,
     WA_TransparentForMouseEvents,
+    WindowActivate,
+    WindowDeactivate,
     WindowShortcut,
     black,
     event_pos,
+    qt_enum_eq,
     qt_enum_int,
     qt_has_flag,
     qt_key_constants,
     qt_key_in,
 )
+from .win_input_capture import AltTabCapture
 
 log = logging.getLogger(__name__)
 _KEY_CONSTANTS = qt_key_constants()
@@ -138,6 +143,10 @@ class RemoteCanvas(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(StrongFocus)
         self.setMinimumSize(320, 240)
+
+    def focusNextPrevChild(self, _next: bool) -> bool:  # noqa: N802
+        # Keep keyboard focus on the canvas so Tab / shortcuts stay remote-bound.
+        return False
 
     def set_image(self, image: QImage) -> None:
         if image.isNull():
@@ -195,6 +204,12 @@ class RemoteCanvas(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._emit_mouse("down", event, button=_qt_button(event.button()))
         self.setFocus(MouseFocusReason)
+        win = self.host_window
+        if win is not None and win.isFullScreen():
+            try:
+                self.grabKeyboard()
+            except RuntimeError:
+                pass
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -218,14 +233,20 @@ class RemoteCanvas(QWidget):
         super().wheelEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
-        # Clipboard hotkeys are handled by the parent window; don't inject them.
+        # Clipboard hotkeys: handle here so grabKeyboard() in fullscreen still works.
         mods = event.modifiers()
         if (
             qt_has_flag(mods, ControlModifier)
             and qt_has_flag(mods, AltModifier)
             and qt_key_in(event.key(), Key_C, Key_V)
         ):
-            event.ignore()
+            win = self.host_window
+            if win is not None and not event.isAutoRepeat():
+                if qt_key_in(event.key(), Key_C):
+                    win._hotkey_push_clipboard()
+                else:
+                    win._hotkey_pull_clipboard()
+            event.accept()
             return
         if self.on_local_key is not None and self.on_local_key(event):
             event.accept()
@@ -241,7 +262,7 @@ class RemoteCanvas(QWidget):
             self.on_before_remote_paste()
         if not event.isAutoRepeat() and self.on_key:
             self.on_key("down", _qt_key_name(event))
-        super().keyPressEvent(event)
+        event.accept()
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         mods = event.modifiers()
@@ -250,7 +271,7 @@ class RemoteCanvas(QWidget):
             and qt_has_flag(mods, AltModifier)
             and qt_key_in(event.key(), Key_C, Key_V)
         ):
-            event.ignore()
+            event.accept()
             return
         # Keep local chrome keys off the remote OS.
         if qt_key_in(event.key(), Key_F11):
@@ -263,7 +284,7 @@ class RemoteCanvas(QWidget):
             return
         if not event.isAutoRepeat() and self.on_key:
             self.on_key("up", _qt_key_name(event))
-        super().keyReleaseEvent(event)
+        event.accept()
 
     def _emit_mouse(self, action: str, event: QMouseEvent, **extra: Any) -> None:
         if not self.on_mouse:
@@ -437,6 +458,8 @@ class RemoteClientPage(QWidget):
         self._file_send_stop = threading.Event()
         self._file_browser: Optional[RemoteFileBrowser] = None
         self._terminal: Optional[RemoteTerminalWindow] = None
+        self._pressed_keys: Set[str] = set()
+        self._input_armed = True
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -541,17 +564,11 @@ class RemoteClientPage(QWidget):
         shell = self._shell
         if shell is None:
             return
+        # Shell owns chrome + keyboard grab for the active tab only.
         shell.set_fullscreen(bool(enabled))
-        self._chrome_hide_timer.stop()
-        self._chrome_hover = False
-        self.chrome_bar.hide()
-        self._exit_fs_btn.hide()
-        if enabled:
-            self._show_chrome_bar()
-            self._chrome_hide_timer.start(1600)
-        self.canvas.setFocus(MouseFocusReason)
 
     def on_shell_fullscreen_changed(self, enabled: bool) -> None:
+        """Update overlay chrome only; keyboard grab is handled by ViewerShell."""
         self._chrome_hide_timer.stop()
         self._chrome_hover = False
         self.chrome_bar.hide()
@@ -559,6 +576,44 @@ class RemoteClientPage(QWidget):
         if enabled and self.isVisible():
             self._show_chrome_bar()
             self._chrome_hide_timer.start(1600)
+
+    def _ensure_canvas_keyboard(self, grab: bool) -> None:
+        """Own keyboard input while this page is the active fullscreen target."""
+        try:
+            if grab:
+                self.canvas.setFocus(MouseFocusReason)
+                self.canvas.grabKeyboard()
+                self._input_armed = True
+            else:
+                self.canvas.releaseKeyboard()
+        except RuntimeError:
+            pass
+
+    def arm_remote_input(self, armed: bool) -> None:
+        """Gate mouse/key injection; flush sticky keys when leaving the viewer."""
+        armed = bool(armed)
+        if armed == self._input_armed:
+            if armed:
+                return
+        self._input_armed = armed
+        if not armed:
+            self.flush_remote_input()
+
+    def flush_remote_input(self) -> None:
+        """Release any keys/buttons left down on the remote (Alt+Tab local steal)."""
+        conn = self._conn
+        stuck = list(self._pressed_keys)
+        self._pressed_keys.clear()
+        if not conn or conn.closed:
+            return
+        try:
+            for key in stuck:
+                conn.send_json(MsgType.KEY, {"action": "up", "key": key})
+            # Host also force-releases modifiers / mouse buttons.
+            conn.send_json(MsgType.KEY, {"action": "flush"})
+            conn.send_json(MsgType.MOUSE, {"action": "flush"})
+        except (ConnectionError, OSError):
+            self._stop.set()
 
     def _on_canvas_mouse_y(self, y: float) -> None:
         # Same reveal gesture in windowed and fullscreen modes.
@@ -646,6 +701,7 @@ class RemoteClientPage(QWidget):
         return True
 
     def shutdown(self) -> None:
+        self._ensure_canvas_keyboard(False)
         self._stop.set()
         self._stop_clipboard()
         if self._terminal is not None:
@@ -1054,6 +1110,8 @@ class RemoteClientPage(QWidget):
             session_stop.wait(min(1.0, interval))
 
     def _handle_mouse(self, action: str, x: float, y: float, extra: Dict[str, Any]) -> None:
+        if not self._input_armed:
+            return
         conn = self._conn
         if not conn or conn.closed:
             return
@@ -1070,13 +1128,33 @@ class RemoteClientPage(QWidget):
             self._stop.set()
 
     def _handle_key(self, action: str, key: str) -> None:
+        if not self._input_armed and action != "up":
+            return
         conn = self._conn
         if not conn or conn.closed:
             return
+        key = (key or "").strip()
+        if not key:
+            return
+        if action == "down":
+            self._pressed_keys.add(key)
+        elif action == "up":
+            self._pressed_keys.discard(key)
         try:
             conn.send_json(MsgType.KEY, {"action": action, "key": key})
         except (ConnectionError, OSError):
             self._stop.set()
+            return
+        # Alt often released before Tab when finishing Alt+Tab — force Tab-up.
+        if action == "up" and key in {"alt", "alt_l", "alt_r"}:
+            shell = self._shell
+            if shell is not None:
+                try:
+                    shell._alt_tab.force_release_tab()
+                except Exception:
+                    pass
+            if "tab" in self._pressed_keys:
+                self._handle_key("up", "tab")
 
 
 def _qt_button(button: Any) -> str:
@@ -1179,6 +1257,9 @@ class ViewerTabCloseButton(QPushButton):
 class ViewerShell(QMainWindow):
     """Single frameless window; session tabs live in the custom title bar."""
 
+    # Cross-thread marshal from the Win32 keyboard hook into the Qt GUI thread.
+    _alt_tab_sig = Signal(str)
+
     def __init__(
         self,
         parent: Optional[QWidget] = None,
@@ -1247,6 +1328,17 @@ class ViewerShell(QMainWindow):
         self.stack.setObjectName("viewerStack")
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(central)
+
+        self._viewer_active = True
+        self._alt_tab_sig.connect(self._on_captured_alt_tab)
+        self._alt_tab = AltTabCapture(
+            lambda action: self._alt_tab_sig.emit(action),
+            is_enabled=self._alt_tab_capture_enabled,
+        )
+        app = QApplication.instance()
+        if app is not None and hasattr(app, "applicationStateChanged"):
+            app.applicationStateChanged.connect(self._on_app_state_changed)
+        QTimer.singleShot(0, self._sync_alt_tab_hook)
 
     def set_on_add_remote(self, callback: Optional[Callable[[], None]]) -> None:
         self._on_add_remote = callback
@@ -1341,8 +1433,9 @@ class ViewerShell(QMainWindow):
             return
         self.stack.setCurrentIndex(index)
         self._sync_chrome_title()
+        self._sync_fullscreen_keyboard()
         page = self.stack.widget(index)
-        if isinstance(page, RemoteClientPage):
+        if isinstance(page, RemoteClientPage) and not self.isFullScreen():
             page.canvas.setFocus(MouseFocusReason)
 
     def _on_tab_moved(self, from_index: int, to_index: int) -> None:
@@ -1379,9 +1472,85 @@ class ViewerShell(QMainWindow):
         self._drag.sync_fullscreen_btn(bool(enabled))
         for page in self.pages():
             page.on_shell_fullscreen_changed(bool(enabled))
+        # Defer grab: showFullScreen() clears focus asynchronously on Windows.
+        QTimer.singleShot(0, self._sync_fullscreen_keyboard)
+        QTimer.singleShot(50, self._sync_fullscreen_keyboard)
+
+    def _sync_fullscreen_keyboard(self) -> None:
+        """Only the active tab may grab the keyboard (avoids multi-tab fights)."""
+        active = self.stack.currentWidget()
+        for page in self.pages():
+            want = bool(self.isFullScreen() and page is active and self._viewer_active)
+            page._ensure_canvas_keyboard(want)
+        self._sync_alt_tab_hook()
+
+    def _alt_tab_capture_enabled(self) -> bool:
+        return bool(
+            self._viewer_active
+            and self.isVisible()
+            and not self.isMinimized()
+            and self.isActiveWindow()
+        )
+
+    def _sync_alt_tab_hook(self) -> None:
+        # Capture Alt+Tab whenever the viewer is the active foreground window so
+        # Tab reaches the remote instead of the local task switcher.
+        try:
+            if self._alt_tab_capture_enabled():
+                self._alt_tab.start()
+            else:
+                self._alt_tab.stop()
+        except Exception:
+            log.exception("Alt+Tab hook sync failed")
+
+    def _on_captured_alt_tab(self, action: str) -> None:
         page = self.stack.currentWidget()
-        if isinstance(page, RemoteClientPage):
-            page.canvas.setFocus(MouseFocusReason)
+        if not isinstance(page, RemoteClientPage):
+            return
+        if action == "down":
+            # Ensure Alt is marked down on the remote before Tab arrives.
+            if "alt" not in page._pressed_keys:
+                page._handle_key("down", "alt")
+            # Ignore OS key-repeat; only one Tab-down until matching up.
+            if "tab" in page._pressed_keys:
+                return
+            page._handle_key("down", "tab")
+            return
+        if "tab" in page._pressed_keys:
+            page._handle_key("up", "tab")
+
+    def _set_viewer_active(self, active: bool) -> None:
+        active = bool(active)
+        if active == self._viewer_active:
+            self._sync_alt_tab_hook()
+            return
+        self._viewer_active = active
+        for page in self.pages():
+            page.arm_remote_input(active)
+        if active:
+            QTimer.singleShot(0, self._sync_fullscreen_keyboard)
+        else:
+            self._alt_tab.stop()
+            for page in self.pages():
+                page._ensure_canvas_keyboard(False)
+
+    def _on_app_state_changed(self, state) -> None:
+        try:
+            active = qt_enum_eq(state, ApplicationActive)
+        except Exception:
+            active = True
+        if not active:
+            self._set_viewer_active(False)
+        elif self.isActiveWindow():
+            self._set_viewer_active(True)
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        etype = event.type()
+        if qt_enum_eq(etype, WindowDeactivate):
+            self._set_viewer_active(False)
+        elif qt_enum_eq(etype, WindowActivate):
+            self._set_viewer_active(True)
 
     def _on_tab_close_requested(self, index: int) -> None:
         page = self.stack.widget(index)
@@ -1402,6 +1571,7 @@ class ViewerShell(QMainWindow):
             self._sync_chrome_title()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._alt_tab.stop()
         pages = self.pages()
         if not self.force_close and pages:
             if len(pages) == 1:
@@ -1429,6 +1599,8 @@ class ViewerShell(QMainWindow):
                 event.ignore()
                 return
         for page in pages:
+            page.arm_remote_input(False)
+            page._ensure_canvas_keyboard(False)
             page.shutdown()
         super().closeEvent(event)
 

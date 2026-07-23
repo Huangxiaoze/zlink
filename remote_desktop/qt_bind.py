@@ -166,6 +166,18 @@ WindowStateChange = _enum(
     getattr(QEvent, "WindowStateChange", None),
     getattr(getattr(QEvent, "Type", None), "WindowStateChange", None),
 )
+WindowActivate = _enum(
+    getattr(QEvent, "WindowActivate", None),
+    getattr(getattr(QEvent, "Type", None), "WindowActivate", None),
+)
+WindowDeactivate = _enum(
+    getattr(QEvent, "WindowDeactivate", None),
+    getattr(getattr(QEvent, "Type", None), "WindowDeactivate", None),
+)
+ApplicationActive = _enum(
+    getattr(Qt, "ApplicationActive", None),
+    getattr(getattr(Qt, "ApplicationState", None), "ApplicationActive", None),
+)
 MouseButtonPress = _enum(
     getattr(QEvent, "MouseButtonPress", None),
     getattr(getattr(QEvent, "Type", None), "MouseButtonPress", None),

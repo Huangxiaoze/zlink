@@ -69,6 +69,8 @@ class InputInjector:
         self.screen_h = max(1, screen_h)
         self._mouse = MouseController()
         self._keyboard = KeyController()
+        self._pressed_keys: set[Any] = set()
+        self._pressed_buttons: set[Button] = set()
 
     def set_screen_size(self, width: int, height: int) -> None:
         self.screen_w = max(1, width)
@@ -76,6 +78,9 @@ class InputInjector:
 
     def handle_mouse(self, msg: dict[str, Any]) -> None:
         action = msg.get("action")
+        if action == "flush":
+            self.release_all_buttons()
+            return
         x = float(msg.get("x", 0.0))
         y = float(msg.get("y", 0.0))
         abs_x = int(max(0.0, min(1.0, x)) * (self.screen_w - 1))
@@ -88,8 +93,10 @@ class InputInjector:
             button = _BUTTONS.get(button_name, Button.left)
             if action == "down":
                 self._mouse.press(button)
+                self._pressed_buttons.add(button)
             elif action == "up":
                 self._mouse.release(button)
+                self._pressed_buttons.discard(button)
             elif action == "click":
                 self._mouse.click(button, int(msg.get("clicks", 1)))
             elif action == "scroll":
@@ -99,6 +106,9 @@ class InputInjector:
 
     def handle_key(self, msg: dict[str, Any]) -> None:
         action = msg.get("action")
+        if action == "flush":
+            self.release_all_keys()
+            return
         key_name = str(msg.get("key", ""))
         if not key_name:
             return
@@ -106,12 +116,56 @@ class InputInjector:
         try:
             if action == "down":
                 self._keyboard.press(key)
+                self._pressed_keys.add(key)
             elif action == "up":
                 self._keyboard.release(key)
+                self._pressed_keys.discard(key)
             elif action == "type":
                 self._keyboard.type(key_name)
         except Exception:
             log.exception("key inject failed key=%s action=%s", key_name, action)
+
+    def release_all_keys(self) -> None:
+        """Release stuck keys (e.g. Alt left down after local Alt+Tab stole focus)."""
+        stuck = list(self._pressed_keys)
+        self._pressed_keys.clear()
+        for key in stuck:
+            try:
+                self._keyboard.release(key)
+            except Exception:
+                pass
+        # Belt-and-suspenders: always poke common modifiers.
+        for key in (
+            Key.alt,
+            Key.alt_l,
+            getattr(Key, "alt_r", Key.alt),
+            Key.ctrl,
+            Key.ctrl_l,
+            Key.ctrl_r,
+            Key.shift,
+            Key.shift_l,
+            Key.shift_r,
+            Key.cmd,
+            Key.cmd_l,
+            Key.cmd_r,
+        ):
+            try:
+                self._keyboard.release(key)
+            except Exception:
+                pass
+
+    def release_all_buttons(self) -> None:
+        stuck = list(self._pressed_buttons)
+        self._pressed_buttons.clear()
+        for button in stuck:
+            try:
+                self._mouse.release(button)
+            except Exception:
+                pass
+
+    def release_all(self) -> None:
+        self.release_all_keys()
+        self.release_all_buttons()
 
 
 def _resolve_key(name: str):

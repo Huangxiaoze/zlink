@@ -200,6 +200,7 @@ class RemoteHost:
         log.info("desktop client connected %s", addr)
         sender: threading.Thread | None = None
         watchdog: threading.Thread | None = None
+        injector: InputInjector | None = None
         session_stop = threading.Event()
         self._clear_session_queues()
         self._term = HostTerminalBridge(self._enqueue_term)
@@ -245,6 +246,8 @@ class RemoteHost:
         finally:
             session_stop.set()
             self.session_live.clear()
+            if injector is not None:
+                injector.release_all()
             if self._term is not None:
                 self._term.close(send_closed=False)
                 self._term = None
@@ -450,6 +453,10 @@ class RemoteHost:
                 injector.handle_mouse(decode_json(frame.payload))
             elif frame.type == MsgType.KEY:
                 injector.handle_key(decode_json(frame.payload))
+            elif frame.type == MsgType.BYE:
+                injector.release_all()
+                session_stop.set()
+                break
             elif frame.type == MsgType.QUALITY:
                 self._apply_quality(decode_json(frame.payload))
             elif frame.type == MsgType.CLIPBOARD:
@@ -490,8 +497,5 @@ class RemoteHost:
                         log.exception("terminal handle failed")
             elif frame.type == MsgType.HEARTBEAT:
                 continue
-            elif frame.type == MsgType.BYE:
-                session_stop.set()
-                break
             else:
                 log.debug("ignore msg %s", frame.type)
