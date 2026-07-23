@@ -73,6 +73,7 @@ from .confirm_dialog import (
     show_warning,
 )
 from .terminal_view import DirectTerminalWindow
+from .tray_icon import AppTray
 from .window_chrome import apply_window_chrome, ensure_windows_app_id
 from .themes import (
     DEFAULT_THEME,
@@ -418,6 +419,8 @@ class MainWindow(QMainWindow):
         self._selected_device_id: str | None = None
         self._device_cards: dict[str, DeviceCard] = {}
         self._card_hover_count = 0
+        self._tray: AppTray | None = None
+        self._quitting = False
 
         self.probe_done.connect(self._apply_probe)
         self.host_crashed.connect(self._on_host_crashed)
@@ -434,6 +437,7 @@ class MainWindow(QMainWindow):
         i18n.on_change(self.retranslate)
         # Start hosting after the first UI paint; user can still stop/start manually.
         QTimer.singleShot(0, self._auto_start_host)
+        QTimer.singleShot(0, self._setup_tray)
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -665,8 +669,27 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 800])
 
+    def _setup_tray(self) -> None:
+        """Windows tray / Ubuntu top-panel StatusNotifier icon."""
+        if self._tray is not None:
+            return
+        if not AppTray.available():
+            log.info("system tray unavailable; close button will quit the app")
+            return
+        try:
+            self._tray = AppTray(self, on_quit=self._quit_from_tray)
+        except Exception as exc:
+            log.warning("failed to create tray icon: %s", exc)
+            self._tray = None
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.setQuitOnLastWindowClosed(False)
+
     def retranslate(self) -> None:
         self.setWindowTitle(i18n.t("app_title"))
+        if self._tray is not None:
+            self._tray.retranslate()
         self.lbl_brand.setText(i18n.t("brand"))
         self.lbl_brand_tag.setText(i18n.t("brand_tag"))
         self.lbl_side_title.setText(i18n.t("local_control"))
@@ -1425,19 +1448,11 @@ class MainWindow(QMainWindow):
         online_n = sum(1 for v in results.values() if v == "online")
         self._set_status(i18n.t("status_updated", online=online_n, total=len(results)))
 
-    def closeEvent(self, event) -> None:  # noqa: N802
-        if not ask_confirm(
-            self,
-            title=i18n.t("close_main_title"),
-            message=i18n.t("close_main_confirm"),
-            eyebrow=i18n.t("brand"),
-            ok_text=i18n.t("close_action"),
-            cancel_text=i18n.t("keep_open"),
-            danger=True,
-        ):
-            event.ignore()
-            return
+    def _quit_from_tray(self) -> None:
+        self._quitting = True
+        self.close()
 
+    def _shutdown_app(self) -> None:
         self._probe_stop.set()
         self._stop_host_clipboard()
         if self._host is not None:
@@ -1448,7 +1463,44 @@ class MainWindow(QMainWindow):
                 win.close()
             except RuntimeError:
                 pass
+        for win in list(self._terminals):
+            try:
+                win.force_close()
+            except RuntimeError:
+                pass
+        if self._tray is not None:
+            self._tray.hide()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        # With a tray icon, the window close button only hides to tray/panel.
+        if (
+            not self._quitting
+            and self._tray is not None
+            and self._tray.is_visible()
+        ):
+            event.ignore()
+            self.hide()
+            self._tray.notify_hidden()
+            return
+
+        if not ask_confirm(
+            self,
+            title=i18n.t("close_main_title"),
+            message=i18n.t("close_main_confirm"),
+            eyebrow=i18n.t("brand"),
+            ok_text=i18n.t("close_action"),
+            cancel_text=i18n.t("keep_open"),
+            danger=True,
+        ):
+            self._quitting = False
+            event.ignore()
+            return
+
+        self._shutdown_app()
         super().closeEvent(event)
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
 
 def _fmt_time(ts: float | None) -> str:

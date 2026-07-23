@@ -183,6 +183,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "close_viewer_confirm": "确定关闭远程控制「{title}」吗？当前会话将会断开。",
         "close_action": "关闭",
         "keep_open": "继续使用",
+        "tray_show": "显示主窗口",
+        "tray_quit": "退出 ZLink",
+        "tray_tooltip": "ZLink",
+        "tray_hidden_title": "ZLink 仍在运行",
+        "tray_hidden_msg": "已最小化到托盘/顶部面板，单击图标可重新打开，右键可退出。",
     },
     "en_US": {
         "app_title": "ZLink",
@@ -362,6 +367,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "close_viewer_confirm": "Close remote control \"{title}\"? The session will disconnect.",
         "close_action": "Close",
         "keep_open": "Keep Open",
+        "tray_show": "Show Main Window",
+        "tray_quit": "Quit ZLink",
+        "tray_tooltip": "ZLink",
+        "tray_hidden_title": "ZLink is still running",
+        "tray_hidden_msg": "Minimized to the tray/panel. Click the icon to reopen, or right-click to quit.",
     },
 }
 

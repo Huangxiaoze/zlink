@@ -50,6 +50,7 @@ try:
         QStyle,
         QStyledItemDelegate,
         QStyleOptionViewItem,
+        QSystemTrayIcon,
         QTableWidget,
         QTableWidgetItem,
         QVBoxLayout,
@@ -103,6 +104,7 @@ except ImportError:  # pragma: no cover - modern hosts
         QStyle,
         QStyledItemDelegate,
         QStyleOptionViewItem,
+        QSystemTrayIcon,
         QTableWidget,
         QTableWidgetItem,
         QVBoxLayout,
@@ -248,6 +250,18 @@ DialogWindow = _enum(
 WindowTypeFlag = _enum(
     getattr(Qt, "Window", None),
     getattr(getattr(Qt, "WindowType", None), "Window", None),
+)
+TrayTrigger = _enum(
+    getattr(QSystemTrayIcon, "Trigger", None),
+    getattr(getattr(QSystemTrayIcon, "ActivationReason", None), "Trigger", None),
+)
+TrayDoubleClick = _enum(
+    getattr(QSystemTrayIcon, "DoubleClick", None),
+    getattr(getattr(QSystemTrayIcon, "ActivationReason", None), "DoubleClick", None),
+)
+TrayMessageInformation = _enum(
+    getattr(QSystemTrayIcon, "Information", None),
+    getattr(getattr(QSystemTrayIcon, "MessageIcon", None), "Information", None),
 )
 SmoothPixmapTransform = _enum(
     getattr(QPainter, "SmoothPixmapTransform", None),
