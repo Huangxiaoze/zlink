@@ -154,6 +154,26 @@ HoverLeave = _enum(
     getattr(QEvent, "HoverLeave", None),
     getattr(getattr(QEvent, "Type", None), "HoverLeave", None),
 )
+WindowStateChange = _enum(
+    getattr(QEvent, "WindowStateChange", None),
+    getattr(getattr(QEvent, "Type", None), "WindowStateChange", None),
+)
+MouseButtonPress = _enum(
+    getattr(QEvent, "MouseButtonPress", None),
+    getattr(getattr(QEvent, "Type", None), "MouseButtonPress", None),
+)
+MouseButtonRelease = _enum(
+    getattr(QEvent, "MouseButtonRelease", None),
+    getattr(getattr(QEvent, "Type", None), "MouseButtonRelease", None),
+)
+MouseButtonDblClick = _enum(
+    getattr(QEvent, "MouseButtonDblClick", None),
+    getattr(getattr(QEvent, "Type", None), "MouseButtonDblClick", None),
+)
+MouseMove = _enum(
+    getattr(QEvent, "MouseMove", None),
+    getattr(getattr(QEvent, "Type", None), "MouseMove", None),
+)
 StrongFocus = _enum(
     getattr(Qt, "StrongFocus", None),
     getattr(getattr(Qt, "FocusPolicy", None), "StrongFocus", None),

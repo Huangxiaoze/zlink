@@ -15,6 +15,11 @@ from .qt_bind import (
     Horizontal,
     HoverEnter,
     HoverLeave,
+    LeftButton,
+    MouseButtonDblClick,
+    MouseButtonPress,
+    MouseButtonRelease,
+    MouseMove,
     NoFocus,
     Password,
     PointingHandCursor,
@@ -30,6 +35,7 @@ from .qt_bind import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QObject,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -40,10 +46,12 @@ from .qt_bind import (
     Signal,
     WA_DeleteOnClose,
     WA_Hover,
+    WindowStateChange,
     dialog_exec,
     make_dialog_button_box,
     menu_exec,
     qt_enum_eq,
+    qt_has_flag,
 )
 
 from .client import RemoteClientWindow
@@ -89,6 +97,40 @@ log = logging.getLogger(__name__)
 
 # Active palette (updated by apply_theme).
 THEME: ThemeColors = resolve_theme(DEFAULT_THEME)
+
+
+def _global_pos(event):
+    if hasattr(event, "globalPosition"):
+        return event.globalPosition().toPoint()
+    return event.globalPos()
+
+
+class _WindowDragFilter(QObject):
+    """Allow dragging a frameless window from decorative UI regions."""
+
+    def __init__(self, host: QMainWindow) -> None:
+        super().__init__(host)
+        self._host = host
+        self._drag_offset = None
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        et = event.type()
+        if qt_enum_eq(et, MouseButtonPress):
+            if qt_enum_eq(event.button(), LeftButton) and not self._host.isMaximized():
+                self._drag_offset = _global_pos(event) - self._host.frameGeometry().topLeft()
+            return False
+        if qt_enum_eq(et, MouseMove):
+            if self._drag_offset is not None and not self._host.isMaximized():
+                if qt_has_flag(event.buttons(), LeftButton):
+                    self._host.move(_global_pos(event) - self._drag_offset)
+            return False
+        if qt_enum_eq(et, MouseButtonRelease):
+            self._drag_offset = None
+            return False
+        if qt_enum_eq(et, MouseButtonDblClick) and qt_enum_eq(event.button(), LeftButton):
+            self._host._toggle_win_max()
+            return True
+        return False
 
 
 def apply_theme(app: QApplication | None, theme_id: str | None) -> ThemeColors:
@@ -448,29 +490,11 @@ class MainWindow(QMainWindow):
         self.resize(1120, 700)
         self.setMinimumSize(920, 580)
         make_frameless_dialog(self, modal=False, as_window=True)
-
-        shell = QWidget()
-        shell.setObjectName("root")
-        shell_l = QVBoxLayout(shell)
-        shell_l.setContentsMargins(0, 0, 0, 0)
-        shell_l.setSpacing(0)
-
-        self._drag = DialogDragBar(
-            self,
-            i18n.t("app_title"),
-            "info",
-            False,
-            window_controls=True,
-            show_maximize=False,
-            compact=True,
-        )
-        shell_l.addWidget(self._drag)
+        self._drag_filter = _WindowDragFilter(self)
 
         root = QWidget()
-        root.setObjectName("rootBody")
-        shell_l.addWidget(root, 1)
-        self.setCentralWidget(shell)
-
+        root.setObjectName("root")
+        self.setCentralWidget(root)
         outer = QHBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -501,12 +525,16 @@ class MainWindow(QMainWindow):
         self.lbl_brand.setObjectName("brand")
         self.lbl_brand_tag = QLabel()
         self.lbl_brand_tag.setObjectName("brandTag")
+        # Frameless: drag the window from brand / titles.
+        self.lbl_brand.installEventFilter(self._drag_filter)
+        self.lbl_brand_tag.installEventFilter(self._drag_filter)
 
         self.lbl_side_title = QLabel()
         self.lbl_side_title.setObjectName("sectionTitle")
         self.lbl_side_hint = QLabel()
         self.lbl_side_hint.setObjectName("sideMuted")
         self.lbl_side_hint.setWordWrap(True)
+        self.lbl_side_title.installEventFilter(self._drag_filter)
 
         card = QFrame()
         card.setObjectName("infoCard")
@@ -601,12 +629,14 @@ class MainWindow(QMainWindow):
 
         main = QWidget()
         main_l = QVBoxLayout(main)
-        main_l.setContentsMargins(22, 20, 22, 16)
+        main_l.setContentsMargins(22, 12, 12, 16)
         main_l.setSpacing(12)
 
         header = QHBoxLayout()
+        header.setSpacing(8)
         self.lbl_list_title = QLabel()
         self.lbl_list_title.setObjectName("pageTitle")
+        self.lbl_list_title.installEventFilter(self._drag_filter)
         header.addWidget(self.lbl_list_title, 1)
         self.btn_add = QPushButton()
         self.btn_probe = QPushButton()
@@ -620,6 +650,22 @@ class MainWindow(QMainWindow):
         header.addWidget(self.btn_probe)
         header.addWidget(self.btn_quick)
         header.addWidget(self.btn_settings)
+
+        self.btn_win_max = QPushButton("□")
+        self.btn_win_max.setObjectName("windowChromeBtn")
+        self.btn_win_max.setFocusPolicy(NoFocus)
+        self.btn_win_max.setCursor(PointingHandCursor)
+        self.btn_win_max.setFixedSize(32, 28)
+        self.btn_win_max.clicked.connect(self._toggle_win_max)
+        self.btn_win_close = QPushButton("×")
+        self.btn_win_close.setObjectName("windowChromeBtn")
+        self.btn_win_close.setFocusPolicy(NoFocus)
+        self.btn_win_close.setCursor(PointingHandCursor)
+        self.btn_win_close.setFixedSize(32, 28)
+        self.btn_win_close.clicked.connect(self.close)
+        header.addWidget(self.btn_win_max, 0)
+        header.addWidget(self.btn_win_close, 0)
+        self._sync_win_max_btn()
 
         search_row = QHBoxLayout()
         self.lbl_search = QLabel()
@@ -707,12 +753,35 @@ class MainWindow(QMainWindow):
         if app is not None:
             app.setQuitOnLastWindowClosed(False)
 
+    def _toggle_win_max(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+        self._sync_win_max_btn()
+
+    def _sync_win_max_btn(self) -> None:
+        btn = getattr(self, "btn_win_max", None)
+        if btn is None:
+            return
+        if self.isMaximized():
+            btn.setText("❐")
+            btn.setToolTip(i18n.t("window_restore"))
+        else:
+            btn.setText("□")
+            btn.setToolTip(i18n.t("window_maximize"))
+        close_btn = getattr(self, "btn_win_close", None)
+        if close_btn is not None:
+            close_btn.setToolTip(i18n.t("close_action"))
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if WindowStateChange is not None and qt_enum_eq(event.type(), WindowStateChange):
+            self._sync_win_max_btn()
+
     def retranslate(self) -> None:
-        title = i18n.t("app_title")
-        self.setWindowTitle(title)
-        drag = getattr(self, "_drag", None)
-        if drag is not None:
-            drag.lbl_title.setText(title)
+        self.setWindowTitle(i18n.t("app_title"))
+        self._sync_win_max_btn()
         if self._tray is not None:
             self._tray.retranslate()
         self.lbl_brand.setText(i18n.t("brand"))

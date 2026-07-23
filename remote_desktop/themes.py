@@ -1058,7 +1058,7 @@ def build_stylesheet(theme_id: str | None = None) -> str:
     on_accent = _contrast_text(c.accent)
     on_accent_2 = _contrast_text(c.accent_2)
     return f"""
-QMainWindow, QWidget#root, QWidget#rootBody {{
+QMainWindow, QWidget#root {{
     background: {c.bg};
     color: {c.text};
 }}
@@ -1415,7 +1415,7 @@ QFrame#dialogTitleBar[compact="true"] QLabel#dialogCaption {{
     font-size: 12px;
     font-weight: 600;
 }}
-QPushButton#dialogClose {{
+QPushButton#dialogClose, QPushButton#windowChromeBtn {{
     background: transparent;
     color: {c.muted};
     border: none;
@@ -1428,13 +1428,16 @@ QFrame#dialogTitleBar[compact="true"] QPushButton#dialogClose {{
     border-radius: 6px;
     font-size: 15px;
 }}
-QPushButton#dialogClose:hover {{
+QPushButton#dialogClose:hover, QPushButton#windowChromeBtn:hover {{
     background: {c.btn_hover};
     color: {c.text};
 }}
-QPushButton#dialogClose:pressed {{
+QPushButton#dialogClose:pressed, QPushButton#windowChromeBtn:pressed {{
     background: {btn_pressed};
     color: {c.text};
+}}
+QPushButton#windowChromeBtn {{
+    font-size: 16px;
 }}
 QLabel#confirmEyebrow {{
     color: {c.muted};
