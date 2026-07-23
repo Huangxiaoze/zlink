@@ -189,6 +189,10 @@ python scripts/build.py --clean --deb
 | Python | ≥3.8 | ≥3.10 |
 | glibc | 2.27 OK | 通常要 ≥2.28 |
 
+## 许可证
+
+本项目采用 [MIT License](./LICENSE) 开源。你可以自由使用、修改和分发本软件，但需保留版权声明与许可全文。
+
 ## 限制
 
 - 仅直连 TCP，无公网中继
