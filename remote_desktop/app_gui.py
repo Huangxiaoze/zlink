@@ -29,6 +29,7 @@ from .qt_bind import (
     PointingHandCursor,
     QAction,
     QApplication,
+    QAbstractButton,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -136,6 +137,31 @@ def _available_screen_size(widget: QWidget | None = None) -> tuple[int, int]:
     return 1280, 720
 
 
+def _widget_allows_window_drag(widget: QObject, host: QMainWindow) -> bool:
+    """True when a frameless window may be dragged from this click target."""
+    if not isinstance(widget, QWidget):
+        return False
+    if widget.window() is not host:
+        return False
+    blocked = (
+        QLineEdit,
+        QPushButton,
+        QAbstractButton,
+        QComboBox,
+        ToggleSwitch,
+    )
+    w: QWidget | None = widget
+    while w is not None:
+        if w is host:
+            break
+        if w.objectName() == "deviceCard":
+            return False
+        if isinstance(w, blocked):
+            return False
+        w = w.parentWidget()
+    return True
+
+
 class _WindowDragFilter(QObject):
     """Allow dragging a frameless window from decorative UI regions."""
 
@@ -147,7 +173,11 @@ class _WindowDragFilter(QObject):
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         et = event.type()
         if qt_enum_eq(et, MouseButtonPress):
-            if qt_enum_eq(event.button(), LeftButton) and not self._host.isMaximized():
+            if (
+                qt_enum_eq(event.button(), LeftButton)
+                and not self._host.isMaximized()
+                and _widget_allows_window_drag(obj, self._host)
+            ):
                 self._drag_offset = _global_pos(event) - self._host.frameGeometry().topLeft()
             return False
         if qt_enum_eq(et, MouseMove):
@@ -899,6 +929,7 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self._card_selection_filter)
+            app.installEventFilter(self._drag_filter)
 
     def _setup_tray(self) -> None:
         """Windows tray / Ubuntu top-panel StatusNotifier icon."""
