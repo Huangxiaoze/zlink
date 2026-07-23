@@ -113,39 +113,53 @@ QApplication
 
 ```text
 remote/
-  AGENTS.md                 # 本文件：决策与规范
+  docs/AGENTS.md            # 本文件：决策与规范
+  LICENSE
   README.md                 # 用户使用说明
   requirements.txt
+  requirements-ubuntu1804.txt
+  requirements-build.txt
   pyproject.toml
   main.py                   # CLI / GUI 入口（默认 gui）
-  remote_desktop/
-    __init__.py
-    config.py               # 默认参数与校验
-    protocol.py             # 二进制帧协议
-    codec.py                # 截屏缩放与 JPEG
-    capture.py              # Host 采集循环
-    input_io.py             # 键鼠映射与注入
-    net.py                  # TCP 帧读写、心跳辅助
-    host.py                 # 被控端
-    client.py               # 主控端
-    devices.py              # 设备列表 / 本机设置持久化
-    i18n.py                 # 中英文文案
-    themes.py               # 浅色/深色/森绿主题与 QSS
-    qt_bind.py              # PySide2/PySide6 兼容层（本分支核心）
-    qt_fonts.py             # CJK 字体选择
-    app_gui.py              # Qt 设备管理界面（卡片列表）
-    client.py               # Qt 远程画面（防闪烁）
-    clipboard_sync.py       # 文字/文件剪贴板同步（Ctrl+Alt+C 推送 / Ctrl+Alt+V 拉取）
-    file_transfer.py        # 专用远程文件传输（MsgType.FILE，落盘 Downloads/ZLink）
-    remote_files.py         # 控制端远程文件浏览器（list/download）
-    terminal_pty.py         # 被控端 PTY / 终端桥
-    terminal_view.py        # 控制端远程终端窗口（pyte）
+  resources/icon/           # 应用图标
+  zlink/
+    README.md               # 包内分层说明
+    __init__.py             # 版本号、PROTOCOL_VERSION
+    core/                   # 协议、网络、配置、JPEG
+      config.py
+      protocol.py
+      net.py
+      codec.py
+    session/                # 被控 / 主控会话
+      host.py
+      client.py             # Qt 远程画面 + RemoteClient CLI
+      capture.py
+      input_io.py
+      pointer_sync.py
+      win_input_capture.py
+    ui/                     # 设备管理 GUI 与 Qt 基础设施
+      app_gui.py
+      themes.py
+      i18n.py
+      qt_bind.py
+      qt_fonts.py
+      confirm_dialog.py
+      toggle_switch.py
+      window_chrome.py
+      app_icon.py
+      tray_icon.py
+    features/               # 设备列表、剪贴板、文件、终端
+      devices.py
+      clipboard_sync.py
+      file_transfer.py
+      remote_files.py
+      terminal_pty.py
+      terminal_view.py
   scripts/build.py          # PyInstaller 跨平台打包入口
   scripts/build_windows.ps1
   scripts/build_linux.sh
   scripts/build_macos.sh
-  requirements-ubuntu1804.txt  # 18.04 钉扎依赖
-  requirements-build.txt       # pyinstaller
+  scripts/windows/          # Inno Setup 等
 ```
 
 ## 4. 协议规范

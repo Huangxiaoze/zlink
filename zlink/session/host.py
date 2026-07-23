@@ -6,15 +6,15 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-from . import PROTOCOL_VERSION
+from .. import PROTOCOL_VERSION
+from ..core.config import HostConfig, StreamConfig
+from ..core.net import Connection, password_matches, serve_forever
+from ..core.protocol import MsgType, ProtocolError, decode_json, pack_frame_message
+from ..features.devices import detect_os_label, remote_username
+from ..features.terminal_pty import FEATURE_TERMINAL, HostTerminalBridge
 from .capture import ScreenCapturer
-from .config import HostConfig, StreamConfig
-from .devices import detect_os_label, remote_username
 from .input_io import InputInjector
-from .net import Connection, password_matches, serve_forever
 from .pointer_sync import PointerAuthority
-from .protocol import MsgType, ProtocolError, decode_json, pack_frame_message
-from .terminal_pty import FEATURE_TERMINAL, HostTerminalBridge
 
 log = logging.getLogger(__name__)
 

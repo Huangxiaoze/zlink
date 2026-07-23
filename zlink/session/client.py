@@ -6,11 +6,22 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Set
 
-from . import PROTOCOL_VERSION
-from .clipboard_sync import ClipboardBridge
-from .config import ClientConfig
-from .app_icon import apply_app_icon
-from .confirm_dialog import (
+from .. import PROTOCOL_VERSION
+from ..core.config import ClientConfig
+from ..core.net import Connection, connect_to
+from ..core.protocol import MsgType, ProtocolError, decode_json, unpack_file_message, unpack_frame_message
+from ..features.clipboard_sync import ClipboardBridge
+from ..features.file_transfer import (
+    FEATURE_FILE_TRANSFER,
+    FileAssembler,
+    file_size_over_limit,
+    send_file,
+)
+from ..features.remote_files import RemoteFileBrowser
+from ..features.terminal_pty import FEATURE_TERMINAL
+from ..features.terminal_view import RemoteTerminalWindow
+from ..ui.app_icon import apply_app_icon
+from ..ui.confirm_dialog import (
     ICON_ADD,
     DialogDragBar,
     WindowChromeButton,
@@ -18,21 +29,8 @@ from .confirm_dialog import (
     make_frameless_dialog,
     show_warning,
 )
-from .themes import CURRENT
-from .file_transfer import (
-    FEATURE_FILE_TRANSFER,
-    FileAssembler,
-    file_size_over_limit,
-    send_file,
-)
-from .remote_files import RemoteFileBrowser
-from .terminal_pty import FEATURE_TERMINAL
-from .terminal_view import RemoteTerminalWindow
-from .window_chrome import apply_window_chrome, ensure_windows_app_id
-from .i18n import i18n
-from .net import Connection, connect_to
-from .protocol import MsgType, ProtocolError, decode_json, unpack_file_message, unpack_frame_message
-from .qt_bind import (
+from ..ui.i18n import i18n
+from ..ui.qt_bind import (
     AltModifier,
     ArrowCursor,
     BlankCursor,
@@ -105,6 +103,8 @@ from .qt_bind import (
     qt_key_in,
     widget_painter,
 )
+from ..ui.themes import CURRENT
+from ..ui.window_chrome import apply_window_chrome, ensure_windows_app_id
 from .win_input_capture import AltTabCapture
 
 log = logging.getLogger(__name__)
@@ -1766,7 +1766,7 @@ class RemoteClient:
         self.config = config
 
     def run(self) -> None:
-        from .qt_fonts import apply_app_font, ensure_utf8_stdio
+        from ..ui.qt_fonts import apply_app_font, ensure_utf8_stdio
 
         ensure_utf8_stdio()
         ensure_windows_app_id()

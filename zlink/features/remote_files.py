@@ -6,15 +6,9 @@ import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, List, Optional
 
-from .confirm_dialog import DialogDragBar, make_frameless_dialog
-from .file_transfer import (
-    file_size_over_limit,
-    pack_download_request,
-    pack_list_request,
-    remote_parent_path,
-)
-from .i18n import i18n
-from .qt_bind import (
+from ..ui.confirm_dialog import DialogDragBar, make_frameless_dialog
+from ..ui.i18n import i18n
+from ..ui.qt_bind import (
     Fixed,
     NoEditTriggers,
     NoFocus,
@@ -41,7 +35,13 @@ from .qt_bind import (
     WA_StyledBackground,
     qt_enum_int,
 )
-from .themes import CURRENT
+from ..ui.themes import CURRENT
+from .file_transfer import (
+    file_size_over_limit,
+    pack_download_request,
+    pack_list_request,
+    remote_parent_path,
+)
 
 # Plain ints — avoid Qt enum objects entirely (PySide2 StateFlag/AlignmentFlag crash).
 _ALIGN_LEFT_VCENTER = 0x0001 | 0x0080  # Qt.AlignLeft | Qt.AlignVCenter

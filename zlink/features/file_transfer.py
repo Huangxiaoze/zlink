@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Optional
 
-from .protocol import pack_file_message, unpack_file_message
+from ..core.protocol import pack_file_message, unpack_file_message
 
 log = logging.getLogger(__name__)
 

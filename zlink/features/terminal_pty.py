@@ -234,7 +234,7 @@ class HostTerminalBridge:
         return sess is not None and sess.alive
 
     def handle_payload(self, payload: bytes) -> None:
-        from .protocol import unpack_term_message
+        from ..core.protocol import unpack_term_message
 
         meta, blob = unpack_term_message(payload)
         op = str(meta.get("op") or "")
@@ -248,7 +248,7 @@ class HostTerminalBridge:
             self.close(send_closed=True)
 
     def open(self, cols: int, rows: int) -> None:
-        from .protocol import pack_term_message
+        from ..core.protocol import pack_term_message
 
         with self._lock:
             self._stop_reader_locked()
@@ -289,7 +289,7 @@ class HostTerminalBridge:
             sess.resize(cols, rows)
 
     def close(self, send_closed: bool = True) -> None:
-        from .protocol import pack_term_message
+        from ..core.protocol import pack_term_message
 
         with self._lock:
             self._stop_reader_locked()
@@ -310,7 +310,7 @@ class HostTerminalBridge:
             reader.join(timeout=1.0)
 
     def _read_loop(self) -> None:
-        from .protocol import pack_term_message
+        from ..core.protocol import pack_term_message
 
         while not self._stop.is_set():
             sess = self._session

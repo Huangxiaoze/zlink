@@ -13,8 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import PROTOCOL_VERSION
-from .config import DEFAULT_PORT
+from .. import PROTOCOL_VERSION
+from ..core.config import DEFAULT_PORT
 
 
 def detect_os_label() -> str:
@@ -99,9 +99,12 @@ def app_data_dir() -> Path:
         root = Path.home() / "Library" / "Application Support"
     else:
         root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    path = root / "remote_desktop"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    path = root / "zlink"
+    legacy = root / "remote_desktop"
+    if path.is_dir() or not legacy.is_dir():
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    return legacy
 
 
 @dataclass
@@ -176,7 +179,7 @@ class DeviceStore:
         lang = str(settings.get("language") or "zh_CN")
         if lang not in {"zh_CN", "en_US"}:
             lang = "zh_CN"
-        from .themes import DEFAULT_THEME, theme_ids
+        from ..ui.themes import DEFAULT_THEME, theme_ids
 
         theme = str(settings.get("theme") or DEFAULT_THEME)
         if theme not in set(theme_ids()):
@@ -310,8 +313,8 @@ def list_local_ipv4() -> list[str]:
 
 def probe_device(host: str, port: int, timeout_s: float = 0.8) -> tuple[bool, str]:
     """Probe host liveness and read OS label from HELLO_ACK (no auth required)."""
-    from .net import connect_to
-    from .protocol import MsgType, decode_json
+    from ..core.net import connect_to
+    from ..core.protocol import MsgType, decode_json
 
     conn = None
     try:

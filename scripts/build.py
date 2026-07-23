@@ -35,7 +35,7 @@ OPT_DIR = "/opt/%s" % PKG_NAME
 
 
 def _app_version() -> str:
-    init_py = ROOT / "remote_desktop" / "__init__.py"
+    init_py = ROOT / "zlink" / "__init__.py"
     text = init_py.read_text(encoding="utf-8")
     for line in text.splitlines():
         if line.startswith("__version__"):
@@ -94,29 +94,37 @@ def _qt_collect_args() -> list[str]:
 
 def _hidden_imports() -> list[str]:
     mods = [
-        "remote_desktop",
-        "remote_desktop.app_gui",
-        "remote_desktop.client",
-        "remote_desktop.host",
-        "remote_desktop.clipboard_sync",
-        "remote_desktop.confirm_dialog",
-        "remote_desktop.app_icon",
-        "remote_desktop.window_chrome",
-        "remote_desktop.themes",
-        "remote_desktop.toggle_switch",
-        "remote_desktop.file_transfer",
-        "remote_desktop.remote_files",
-        "remote_desktop.terminal_pty",
-        "remote_desktop.terminal_view",
-        "remote_desktop.qt_bind",
-        "remote_desktop.qt_fonts",
-        "remote_desktop.i18n",
-        "remote_desktop.devices",
-        "remote_desktop.capture",
-        "remote_desktop.codec",
-        "remote_desktop.input_io",
-        "remote_desktop.net",
-        "remote_desktop.protocol",
+        "zlink",
+        "zlink.core",
+        "zlink.core.config",
+        "zlink.core.protocol",
+        "zlink.core.net",
+        "zlink.core.codec",
+        "zlink.session",
+        "zlink.session.host",
+        "zlink.session.client",
+        "zlink.session.capture",
+        "zlink.session.input_io",
+        "zlink.session.pointer_sync",
+        "zlink.session.win_input_capture",
+        "zlink.ui",
+        "zlink.ui.app_gui",
+        "zlink.ui.qt_bind",
+        "zlink.ui.qt_fonts",
+        "zlink.ui.themes",
+        "zlink.ui.i18n",
+        "zlink.ui.confirm_dialog",
+        "zlink.ui.toggle_switch",
+        "zlink.ui.window_chrome",
+        "zlink.ui.app_icon",
+        "zlink.ui.tray_icon",
+        "zlink.features",
+        "zlink.features.devices",
+        "zlink.features.clipboard_sync",
+        "zlink.features.file_transfer",
+        "zlink.features.remote_files",
+        "zlink.features.terminal_pty",
+        "zlink.features.terminal_view",
         "mss",
         "PIL",
         "pynput",
@@ -517,7 +525,7 @@ def main(argv: list[str] | None = None) -> int:
         cmd.extend(["--icon", str(icon_ico)])
 
     cmd.extend(_qt_collect_args())
-    cmd.extend(["--collect-submodules", "remote_desktop"])
+    cmd.extend(["--collect-submodules", "zlink"])
     cmd.extend(_hidden_imports())
     cmd.extend(_datas_args())
     cmd.append(str(ROOT / "main.py"))

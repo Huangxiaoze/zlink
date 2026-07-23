@@ -48,20 +48,20 @@ def main(argv: list[str] | None = None) -> int:
     command = args.command or "gui"
 
     if command == "gui":
-        from remote_desktop.app_gui import run_app
+        from zlink.ui.app_gui import run_app
 
         run_app()
         return 0
 
-    from remote_desktop.client import RemoteClient
-    from remote_desktop.config import (
+    from zlink.session.client import RemoteClient
+    from zlink.core.config import (
         DEFAULT_PORT,
         ClientConfig,
         HostConfig,
         NetConfig,
         StreamConfig,
     )
-    from remote_desktop.host import RemoteHost
+    from zlink.session.host import RemoteHost
 
     stream = StreamConfig(max_fps=args.fps, jpeg_quality=args.quality, scale=args.scale).clamp()
 

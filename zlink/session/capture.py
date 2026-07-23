@@ -7,8 +7,8 @@ from typing import Callable
 
 import mss
 
-from .codec import EncodedFrame, encode_bgra
-from .config import StreamConfig
+from ..core.codec import EncodedFrame, encode_bgra
+from ..core.config import StreamConfig
 
 log = logging.getLogger(__name__)
 

@@ -7,14 +7,13 @@ import threading
 import time
 from typing import Callable, Optional
 
-from . import PROTOCOL_VERSION
-from .terminal_pty import FEATURE_TERMINAL
-from .config import NetConfig
-from .confirm_dialog import DialogDragBar, ask_confirm, make_frameless_dialog
-from .i18n import i18n
-from .net import Connection, connect_to
-from .protocol import MsgType, ProtocolError, decode_json, pack_term_message
-from .qt_bind import (
+from .. import PROTOCOL_VERSION
+from ..core.config import NetConfig
+from ..core.net import Connection, connect_to
+from ..core.protocol import MsgType, ProtocolError, decode_json, pack_term_message
+from ..ui.confirm_dialog import DialogDragBar, ask_confirm, make_frameless_dialog
+from ..ui.i18n import i18n
+from ..ui.qt_bind import (
     AlignLeft,
     AlignTop,
     ControlModifier,
@@ -49,7 +48,8 @@ from .qt_bind import (
     set_font_families,
     widget_painter,
 )
-from .themes import CURRENT
+from ..ui.themes import CURRENT
+from .terminal_pty import FEATURE_TERMINAL
 
 log = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ class RemoteTerminalWindow(QDialog):
         self.setWindowTitle(caption)
 
     def handle_term_payload(self, payload: bytes) -> None:
-        from .protocol import unpack_term_message
+        from ..core.protocol import unpack_term_message
 
         meta, blob = unpack_term_message(payload)
         op = str(meta.get("op") or "")
@@ -532,7 +532,7 @@ class DirectTerminalWindow(QDialog):
     def _on_term_payload(self, payload: object) -> None:
         if payload is None:
             return
-        from .protocol import unpack_term_message
+        from ..core.protocol import unpack_term_message
 
         try:
             meta, blob = unpack_term_message(bytes(payload))

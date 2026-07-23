@@ -2,7 +2,7 @@
 
 跨平台远程桌面控制，本分支面向 **Ubuntu 18.04**（glibc 2.27）：默认使用 **PySide2 / Qt5**。
 
-设计说明见 [AGENTS.md](./AGENTS.md)。
+设计说明见 [docs/AGENTS.md](./docs/AGENTS.md)。Python 包布局见 [zlink/README.md](./zlink/README.md)。
 
 ## 系统要求（Ubuntu 18.04）
 

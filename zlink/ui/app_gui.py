@@ -61,11 +61,11 @@ from .qt_bind import (
     qt_enum_int,
 )
 
-from .client import RemoteClientPage, ViewerShell
-from .clipboard_sync import ClipboardBridge
-from .config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamConfig
-from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_device
-from .file_transfer import (
+from ..core.config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamConfig
+from ..core.protocol import unpack_file_message
+from ..features.clipboard_sync import ClipboardBridge
+from ..features.devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_device
+from ..features.file_transfer import (
     FileAssembler,
     file_size_over_limit,
     list_directory,
@@ -73,10 +73,9 @@ from .file_transfer import (
     pack_list_result,
     send_file,
 )
-from .protocol import unpack_file_message
-from .host import RemoteHost
-from .i18n import i18n
-from .qt_fonts import apply_app_font, ensure_utf8_stdio
+from ..features.terminal_view import DirectTerminalWindow
+from ..session.client import RemoteClientPage, ViewerShell
+from ..session.host import RemoteHost
 from .app_icon import apply_app_icon
 from .confirm_dialog import (
     DialogDragBar,
@@ -91,7 +90,9 @@ from .confirm_dialog import (
     show_info,
     show_warning,
 )
-from .terminal_view import DirectTerminalWindow
+from .i18n import i18n
+from .qt_fonts import apply_app_font, ensure_utf8_stdio
+from ..features.terminal_view import DirectTerminalWindow
 from .tray_icon import AppTray
 from .window_chrome import apply_window_chrome, ensure_windows_app_id
 from .themes import (
@@ -1441,7 +1442,7 @@ class MainWindow(QMainWindow):
         threading.Thread(target=worker, name="host-remote-list", daemon=True).start()
 
     def _handle_remote_download_request(self, meta: dict) -> None:
-        from .file_transfer import resolve_browse_path
+        from ..features.file_transfer import resolve_browse_path
 
         path = str(meta.get("path") or "")
         if self._file_sending:

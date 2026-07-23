@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .file_transfer import CHUNK_SIZE, MAX_FILE_BYTES, file_size_over_limit
-from .protocol import pack_clipboard_message, unpack_clipboard_message
-from .qt_bind import (
+from ..core.protocol import pack_clipboard_message, unpack_clipboard_message
+from ..ui.qt_bind import (
     QApplication,
     QClipboard,
     QMimeData,

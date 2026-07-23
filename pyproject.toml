@@ -24,4 +24,4 @@ remote-desktop = "main:main"
 py-modules = ["main"]
 
 [tool.setuptools.packages.find]
-include = ["remote_desktop*"]
+include = ["zlink*"]
