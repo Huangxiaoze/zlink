@@ -43,6 +43,7 @@ from .qt_bind import (
     Stretch,
     UserRole,
     WA_StyledBackground,
+    qt_enum_int,
 )
 from .themes import CURRENT
 
@@ -69,14 +70,8 @@ def _fmt_mtime(ts: int) -> str:
 
 
 def _align(item: QTableWidgetItem, *flags: Any) -> None:
-    value = 0
-    for flag in flags:
-        try:
-            value |= int(flag)
-        except (TypeError, ValueError):
-            value |= int(getattr(flag, "value", 0) or 0)
     try:
-        item.setTextAlignment(value)
+        item.setTextAlignment(_align_flags(*flags))
     except Exception:
         pass
 
@@ -85,17 +80,19 @@ def _align_flags(*flags: Any) -> int:
     value = 0
     for flag in flags:
         try:
-            value |= int(flag)
-        except (TypeError, ValueError):
-            value |= int(getattr(flag, "value", 0) or 0)
-    return value
+            value |= qt_enum_int(flag)
+        except Exception:
+            continue
+    return int(value)
 
 
 def _state_flag(name: str) -> Any:
+    # Prefer QStyle.State_* (int-compatible on PySide2). StateFlag enum members
+    # cannot be used with ``&`` / ``int()`` on Ubuntu 18.04 PySide2.
     for obj in (
-        getattr(QStyle, "StateFlag", None),
-        getattr(QStyle, "State", None),
         QStyle,
+        getattr(QStyle, "State", None),
+        getattr(QStyle, "StateFlag", None),
     ):
         if obj is None:
             continue
@@ -105,14 +102,62 @@ def _state_flag(name: str) -> Any:
     return None
 
 
-def _has_state(state: Any, name: str) -> bool:
-    flag = _state_flag(name)
-    if flag is None:
-        return False
+# Qt5/Qt6 QStyle::State bits used when enum→int conversion fails (PySide2).
+_STATE_BITS = {
+    "State_Selected": 0x00008000,
+    "State_MouseOver": 0x00002000,  # Qt6; Qt5 also exposes State_Hover=0x40
+    "State_Hover": 0x00000040,
+}
+
+
+def _flag_bits(flag: Any, name: str = "") -> int:
     try:
-        return bool(state & flag)
+        return qt_enum_int(flag)
     except Exception:
+        pass
+    for attr in ("value", "_value_"):
+        raw = getattr(flag, attr, None)
+        if raw is None:
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            continue
+    if name in _STATE_BITS:
+        return int(_STATE_BITS[name])
+    # Last resort: some PySide2 builds stringify like "...State_Selected".
+    text = str(flag)
+    for key, bits in _STATE_BITS.items():
+        if key in text:
+            return int(bits)
+    return 0
+
+
+def _has_state(state: Any, name: str) -> bool:
+    if state is None:
         return False
+    flag = _state_flag(name)
+    try:
+        state_bits = _flag_bits(state)
+    except Exception:
+        try:
+            state_bits = int(state)
+        except Exception:
+            return False
+    flag_bits = _flag_bits(flag, name) if flag is not None else _STATE_BITS.get(name, 0)
+    if not flag_bits:
+        return False
+    # Qt5 uses State_Hover (0x40); Qt6 primarily State_MouseOver (0x2000).
+    if name == "State_MouseOver":
+        flag_bits |= _STATE_BITS.get("State_Hover", 0)
+    return bool(int(state_bits) & int(flag_bits))
+
+
+def _item_role() -> int:
+    try:
+        return qt_enum_int(UserRole)
+    except Exception:
+        return 256
 
 
 class RemoteFileItemDelegate(QStyledItemDelegate):
@@ -123,62 +168,75 @@ class RemoteFileItemDelegate(QStyledItemDelegate):
     """
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # type: ignore[override]
+        try:
+            self._paint_row(painter, option, index)
+        except Exception:
+            # Never let a PySide2 enum quirk blank the whole browser.
+            try:
+                super().paint(painter, option, index)
+            except Exception:
+                pass
+
+    def _paint_row(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
 
-        entry = index.sibling(index.row(), 0).data(UserRole)
+        role = _item_role()
+        entry = index.sibling(index.row(), 0).data(role)
         is_dir = isinstance(entry, dict) and bool(entry.get("is_dir"))
         col = index.column()
         text = str(index.data() or "")
 
-        selected = _has_state(opt.state, "State_Selected")
-        hover = _has_state(opt.state, "State_MouseOver")
+        selected = _has_state(getattr(opt, "state", None), "State_Selected")
+        hover = _has_state(getattr(opt, "state", None), "State_MouseOver")
 
         painter.save()
-        painter.setClipRect(opt.rect)
+        try:
+            painter.setClipRect(opt.rect)
 
-        # Background from the same palette as text colors → always readable.
-        painter.fillRect(opt.rect, QColor(CURRENT.input_bg))
-        if (index.row() % 2) == 1 and not selected:
-            alt = QColor(CURRENT.text)
-            alt.setAlpha(12)
-            painter.fillRect(opt.rect, alt)
-        if hover and not selected:
-            wash = QColor(CURRENT.accent)
-            wash.setAlpha(26)
-            painter.fillRect(opt.rect, wash)
-        if selected:
-            painter.fillRect(opt.rect, QColor(CURRENT.card_selected))
+            # Background from the same palette as text colors → always readable.
+            painter.fillRect(opt.rect, QColor(CURRENT.input_bg))
+            if (index.row() % 2) == 1 and not selected:
+                alt = QColor(CURRENT.text)
+                alt.setAlpha(12)
+                painter.fillRect(opt.rect, alt)
+            if hover and not selected:
+                wash = QColor(CURRENT.accent)
+                wash.setAlpha(26)
+                painter.fillRect(opt.rect, wash)
+            if selected:
+                painter.fillRect(opt.rect, QColor(CURRENT.card_selected))
 
-        if col == 0:
-            color = QColor(CURRENT.accent if is_dir else CURRENT.text)
-            label = ("▸  %s" % text) if is_dir else ("    %s" % text)
-            font = QFont(opt.font)
-            if is_dir:
-                font.setBold(True)
-            align = _align_flags(AlignLeft, AlignVCenter)
-        elif col == 1:
-            color = QColor(CURRENT.accent if is_dir else CURRENT.muted)
-            label = text
-            font = QFont(opt.font)
-            if is_dir:
-                font.setBold(True)
-            align = _align_flags(AlignLeft, AlignVCenter)
-        elif col == 2:
-            color = QColor(CURRENT.muted)
-            label = text
-            font = QFont(opt.font)
-            align = _align_flags(AlignRight, AlignVCenter)
-        else:
-            color = QColor(CURRENT.muted)
-            label = text
-            font = QFont(opt.font)
-            align = _align_flags(AlignLeft, AlignVCenter)
+            if col == 0:
+                color = QColor(CURRENT.accent if is_dir else CURRENT.text)
+                label = ("▸  %s" % text) if is_dir else ("    %s" % text)
+                font = QFont(opt.font)
+                if is_dir:
+                    font.setBold(True)
+                align = _align_flags(AlignLeft, AlignVCenter)
+            elif col == 1:
+                color = QColor(CURRENT.accent if is_dir else CURRENT.muted)
+                label = text
+                font = QFont(opt.font)
+                if is_dir:
+                    font.setBold(True)
+                align = _align_flags(AlignLeft, AlignVCenter)
+            elif col == 2:
+                color = QColor(CURRENT.muted)
+                label = text
+                font = QFont(opt.font)
+                align = _align_flags(AlignRight, AlignVCenter)
+            else:
+                color = QColor(CURRENT.muted)
+                label = text
+                font = QFont(opt.font)
+                align = _align_flags(AlignLeft, AlignVCenter)
 
-        painter.setPen(color)
-        painter.setFont(font)
-        painter.drawText(opt.rect.adjusted(10, 0, -8, 0), align, label)
-        painter.restore()
+            painter.setPen(color)
+            painter.setFont(font)
+            painter.drawText(opt.rect.adjusted(10, 0, -8, 0), int(align), label)
+        finally:
+            painter.restore()
 
 
 class RemoteFileBrowser(QDialog):
@@ -259,7 +317,7 @@ class RemoteFileBrowser(QDialog):
         header = self.table.horizontalHeader()
         header.setHighlightSections(False)
         try:
-            header.setDefaultAlignment(int(AlignLeft) | int(AlignVCenter))
+            header.setDefaultAlignment(_align_flags(AlignLeft, AlignVCenter))
         except Exception:
             pass
         header.setStretchLastSection(False)
@@ -360,7 +418,7 @@ class RemoteFileBrowser(QDialog):
             mtime = int(entry.get("mtime") or 0)
 
             item_name = QTableWidgetItem(name)
-            item_name.setData(UserRole, entry)
+            item_name.setData(_item_role(), entry)
             _align(item_name, AlignLeft, AlignVCenter)
 
             item_type = QTableWidgetItem(
@@ -390,14 +448,14 @@ class RemoteFileBrowser(QDialog):
             item = self.table.item(rows[0].row(), 0)
         if item is None:
             return None
-        data = item.data(UserRole)
+        data = item.data(_item_role())
         return data if isinstance(data, dict) else None
 
     def _on_double_click(self, row: int, _col: int) -> None:
         item = self.table.item(row, 0)
         if item is None:
             return
-        entry = item.data(UserRole)
+        entry = item.data(_item_role())
         if not isinstance(entry, dict):
             return
         if entry.get("is_dir"):

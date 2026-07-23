@@ -477,13 +477,24 @@ def menu_exec(menu: QMenu, position: Any = None) -> Any:
 
 def qt_enum_int(value: Any) -> int:
     """PySide2 enums often reject implicit int(); normalize for constructors/compare."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
     try:
         return int(value)
     except (TypeError, ValueError):
-        raw = getattr(value, "value", None)
-        if raw is not None:
+        pass
+    for attr in ("value", "_value_", "__enum_value__"):
+        raw = getattr(value, attr, None)
+        if raw is None or raw is value:
+            continue
+        try:
             return int(raw)
-        return int(getattr(value, "__int__", lambda: value)())
+        except (TypeError, ValueError):
+            continue
+    try:
+        return int(getattr(value, "__int__")())
+    except Exception as exc:
+        raise TypeError("cannot convert %r to int" % (value,)) from exc
 
 
 def qt_enum_eq(left: Any, right: Any) -> bool:
