@@ -59,7 +59,7 @@ from .config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamCon
 from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_device
 from .file_transfer import (
     FileAssembler,
-    MAX_FILE_BYTES,
+    file_size_over_limit,
     list_directory,
     pack_download_error,
     pack_list_result,
@@ -1301,7 +1301,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             return
-        if src.stat().st_size > MAX_FILE_BYTES:
+        if file_size_over_limit(src.stat().st_size):
             try:
                 self._enqueue_host_file(
                     pack_download_error(path, i18n.t("file_too_large", name=src.name))

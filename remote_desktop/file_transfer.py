@@ -17,10 +17,16 @@ from .protocol import pack_file_message, unpack_file_message
 
 log = logging.getLogger(__name__)
 
-MAX_FILE_BYTES = 64 * 1024 * 1024
+# Per-file size cap for dedicated transfer + clipboard file sync. 0 = unlimited.
+MAX_FILE_BYTES = 0
 CHUNK_SIZE = 256 * 1024
 MAX_LIST_ENTRIES = 400
 FEATURE_FILE_TRANSFER = "file_transfer"
+
+
+def file_size_over_limit(size: int) -> bool:
+    """True when ``size`` exceeds ``MAX_FILE_BYTES`` (ignored when cap is 0)."""
+    return MAX_FILE_BYTES > 0 and size > MAX_FILE_BYTES
 
 
 def transfer_dir() -> Path:
@@ -366,7 +372,7 @@ def send_file(
     if not path.is_file():
         raise FileNotFoundError(str(path))
     size = path.stat().st_size
-    if size > MAX_FILE_BYTES:
+    if file_size_over_limit(size):
         raise ValueError("file too large: %s bytes (max %s)" % (size, MAX_FILE_BYTES))
 
     file_id = uuid.uuid4().hex
@@ -502,7 +508,7 @@ class FileAssembler:
         size = int(meta.get("size") or 0)
         offset = int(meta.get("offset") or 0)
         done = bool(meta.get("done"))
-        if not file_id or size < 0 or size > MAX_FILE_BYTES:
+        if not file_id or size < 0 or file_size_over_limit(size):
             if self._on_error is not None:
                 self._on_error("invalid file meta")
             return None

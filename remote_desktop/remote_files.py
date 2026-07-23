@@ -8,7 +8,7 @@ from typing import Any, Callable, List, Optional
 
 from .confirm_dialog import DialogDragBar, make_frameless_dialog
 from .file_transfer import (
-    MAX_FILE_BYTES,
+    file_size_over_limit,
     pack_download_request,
     pack_list_request,
     remote_parent_path,
@@ -417,7 +417,7 @@ class RemoteFileBrowser(QDialog):
         size = int(entry.get("size") or 0)
         if not path:
             return
-        if size > MAX_FILE_BYTES:
+        if file_size_over_limit(size):
             self._set_status(i18n.t("file_too_large", name=name))
             return
         if self._busy:

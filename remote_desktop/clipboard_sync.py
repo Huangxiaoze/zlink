@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
+from .file_transfer import CHUNK_SIZE, MAX_FILE_BYTES, file_size_over_limit
 from .protocol import pack_clipboard_message, unpack_clipboard_message
 from .qt_bind import (
     QApplication,
@@ -24,8 +25,6 @@ from .qt_bind import (
 log = logging.getLogger(__name__)
 
 MAX_TEXT_BYTES = 2 * 1024 * 1024
-MAX_FILE_BYTES = 64 * 1024 * 1024
-CHUNK_SIZE = 256 * 1024
 MAX_FILES_PER_SYNC = 8
 
 
@@ -236,7 +235,7 @@ class ClipboardBridge(QObject):
             if not path.is_file():
                 continue
             size = path.stat().st_size
-            if size > MAX_FILE_BYTES:
+            if file_size_over_limit(size):
                 self.status.emit("file too large: %s" % path.name)
                 log.warning("skip large file %s (%s)", path, size)
                 continue
@@ -308,7 +307,7 @@ class ClipboardBridge(QObject):
         size = int(meta.get("size") or 0)
         offset = int(meta.get("offset") or 0)
         done = bool(meta.get("done"))
-        if not file_id or size < 0 or size > MAX_FILE_BYTES:
+        if not file_id or size < 0 or file_size_over_limit(size):
             return
         with self._lock:
             state = self._incoming.get(file_id)

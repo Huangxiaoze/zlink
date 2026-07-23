@@ -49,8 +49,8 @@ sudo apt install -y fonts-wqy-microhei
 - 本机远控开关 / 设备卡片列表 / 在线探测
 - 远程画面防闪烁合帧渲染
 - 键鼠控制
-- **剪贴板同步**：文字/文件（≤64MB）
-- **远程文件传输**：独立通道互传文件（单文件 ≤64MB），保存到 `Downloads/ZLink`
+- **剪贴板同步**：文字/文件（分块传输，默认无单文件大小上限）
+- **远程文件传输**：独立通道互传文件（256KiB 分块，默认无单文件大小上限），保存到 `Downloads/ZLink`
 - **远程终端**：类似 SSH，可从主界面直接连接交互式 shell（PTY），无需先开远程桌面
 
 ### 文件传输怎么用
@@ -98,12 +98,12 @@ python main.py client --host <IP> --password <code>
 
 在**目标平台本机**打包（PyInstaller 交叉编译 Qt 应用不可靠）：
 
-| 平台 | 脚本 |
-|------|------|
-| Windows | `powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1` |
-| Linux（二进制） | `bash scripts/build_linux.sh` |
-| Ubuntu/Debian（`.deb`） | `bash scripts/build_deb.sh` |
-| macOS | `bash scripts/build_macos.sh` |
+| 平台　　　　　　　　　　| 脚本　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| -------------------------| ----------------------------------------------------------------------|
+| Windows　　　　　　　　 | `powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1` |
+| Linux（二进制）　　　　 | `bash scripts/build_linux.sh`　　　　　　　　　　　　　　　　　　　　|
+| Ubuntu/Debian（`.deb`） | `bash scripts/build_deb.sh`　　　　　　　　　　　　　　　　　　　　　|
+| macOS　　　　　　　　　 | `bash scripts/build_macos.sh`　　　　　　　　　　　　　　　　　　　　|
 
 ### Windows 安装包（推荐）
 

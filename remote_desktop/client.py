@@ -22,7 +22,7 @@ from .themes import CURRENT
 from .file_transfer import (
     FEATURE_FILE_TRANSFER,
     FileAssembler,
-    MAX_FILE_BYTES,
+    file_size_over_limit,
     send_file,
 )
 from .remote_files import RemoteFileBrowser
@@ -1031,7 +1031,7 @@ class RemoteClientPage(QWidget):
         src = Path(path)
         if not src.is_file():
             return False
-        if src.stat().st_size > MAX_FILE_BYTES:
+        if file_size_over_limit(src.stat().st_size):
             show_warning(
                 self,
                 title=i18n.t("tip"),

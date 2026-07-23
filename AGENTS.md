@@ -180,11 +180,11 @@ magic = b"RD01"
 CLIPBOARD meta：
 
 - 文字：`{"kind":"text"}`，blob 为 UTF-8 文本（≤2MiB）
-- 文件：`{"kind":"file","id","name","size","offset","done"}`，blob 为分片（单文件≤64MiB）
+- 文件：`{"kind":"file","id","name","size","offset","done"}`，blob 为分片（块 256KiB）
 
 FILE meta（与剪贴板文件通道独立，不经系统剪贴板）：
 
-- 分片：`{"op":"chunk","id","name","size","offset","done"}`，blob 为分片（单文件≤64MiB，块 256KiB）
+- 分片：`{"op":"chunk","id","name","size","offset","done"}`，blob 为分片（块 256KiB；默认无单文件大小上限）
 - 列目录：控制端 `{"op":"list","path"}` → 被控端 `list_ok` / `list_err`（entries 含 name/path/is_dir/size/mtime）
 - 远程下载：控制端 `{"op":"download","path"}` → 被控端回传 `chunk` 分片（或 `download_err`）
 - 能力协商：HELLO_ACK `features` 含 `"file_transfer"`
