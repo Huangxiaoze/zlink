@@ -29,6 +29,7 @@ from .qt_bind import (
     QFormLayout,
     QFrame,
     QGridLayout,
+    QGuiApplication,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -106,6 +107,28 @@ def _global_pos(event):
     return event.globalPos()
 
 
+def _available_screen_size(widget: QWidget | None = None) -> tuple[int, int]:
+    """Usable desktop size for the screen hosting *widget* (or primary)."""
+    screen = None
+    if widget is not None:
+        try:
+            handle = widget.window().windowHandle() if widget.window() else None
+            if handle is not None:
+                screen = handle.screen()
+        except RuntimeError:
+            screen = None
+    if screen is None:
+        screen = QGuiApplication.primaryScreen()
+    if screen is None:
+        app = QApplication.instance()
+        if app is not None and hasattr(app, "primaryScreen"):
+            screen = app.primaryScreen()
+    if screen is not None:
+        geo = screen.availableGeometry()
+        return int(geo.width()), int(geo.height())
+    return 1280, 720
+
+
 class _WindowDragFilter(QObject):
     """Allow dragging a frameless window from decorative UI regions."""
 
@@ -171,7 +194,7 @@ class DeviceCard(QFrame):
         self.device_id = device.id
         self.setObjectName("deviceCard")
         self.setCursor(PointingHandCursor)
-        self.setMinimumWidth(220)
+        self.setMinimumWidth(180)
         self.setMaximumWidth(360)
         self.setProperty("selected", False)
         self.setAttribute(WA_Hover, True)
@@ -483,12 +506,34 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         # winId() is valid after the native window exists.
         apply_window_chrome(self, THEME)
+        # Clamp once the native screen is known (multi-monitor / DPI-safe).
+        if not getattr(self, "_geometry_fitted", False):
+            self._geometry_fitted = True
+            avail_w, avail_h = _available_screen_size(self)
+            if self.width() > avail_w - 24 or self.height() > avail_h - 24:
+                self._apply_window_geometry()
+
+    def _apply_window_geometry(self) -> None:
+        """Size the main window for the current screen; keep it resizable on small displays."""
+        avail_w, avail_h = _available_screen_size(self)
+        # Keep a thin margin so the frameless window never clips under taskbars.
+        max_w = max(560, avail_w - 24)
+        max_h = max(360, avail_h - 24)
+        # Soft floor — never larger than the screen itself.
+        self.setMinimumSize(min(640, max_w), min(420, max_h))
+
+        target_w = min(1120, max_w)
+        target_h = min(700, max_h)
+        # On compact screens, use nearly the full available desktop.
+        if avail_w < 1100 or avail_h < 700:
+            target_w = max_w
+            target_h = max_h
+        self.resize(int(target_w), int(target_h))
 
     def _build(self) -> None:
-        self.resize(1120, 700)
-        self.setMinimumSize(920, 580)
         make_frameless_dialog(self, modal=False, as_window=True)
         self._drag_filter = _WindowDragFilter(self)
+        self._apply_window_geometry()
 
         root = QWidget()
         root.setObjectName("root")
@@ -502,7 +547,7 @@ class MainWindow(QMainWindow):
 
         side = QFrame()
         side.setObjectName("side")
-        side.setMinimumWidth(300)
+        side.setMinimumWidth(220)
         side.setMaximumWidth(360)
         side_l = QVBoxLayout(side)
         side_l.setContentsMargins(0, 0, 0, 0)
@@ -905,7 +950,7 @@ class MainWindow(QMainWindow):
 
     def _device_columns(self) -> int:
         width = max(1, self.device_scroll.viewport().width())
-        return max(1, min(3, width // 260))
+        return max(1, min(3, width // 200))
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
