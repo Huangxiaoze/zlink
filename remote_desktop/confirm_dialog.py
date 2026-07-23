@@ -76,20 +76,30 @@ class _DragBar(QFrame):
         danger: bool = False,
         *,
         window_controls: bool = False,
+        compact: bool = False,
     ) -> None:
         super().__init__(host)
         self._host = host
         self._drag_offset = None
         self._window_controls = bool(window_controls)
+        self._compact = bool(compact)
         self.setObjectName("dialogTitleBar")
         self.setAttribute(WA_StyledBackground, True)
         # Keep kind/danger for callers; accent stripe was removed as visual noise.
         self.setProperty("kind", kind)
         self.setProperty("danger", "true" if danger else "false")
+        self.setProperty("compact", "true" if self._compact else "false")
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(16, 10, 10, 8)
-        row.setSpacing(4)
+        if self._compact:
+            row.setContentsMargins(10, 2, 4, 2)
+            row.setSpacing(2)
+            btn_w, btn_h = 26, 22
+            self.setFixedHeight(28)
+        else:
+            row.setContentsMargins(16, 10, 10, 8)
+            row.setSpacing(4)
+            btn_w, btn_h = 32, 28
         self.lbl_title = QLabel(title)
         self.lbl_title.setObjectName("dialogCaption")
         row.addWidget(self.lbl_title, 1)
@@ -102,7 +112,7 @@ class _DragBar(QFrame):
             self.btn_min.setToolTip(i18n.t("window_minimize"))
             self.btn_min.setCursor(PointingHandCursor)
             self.btn_min.setFocusPolicy(NoFocus)
-            self.btn_min.setFixedSize(32, 28)
+            self.btn_min.setFixedSize(btn_w, btn_h)
             self.btn_min.clicked.connect(host.showMinimized)
             row.addWidget(self.btn_min, 0)
 
@@ -111,7 +121,7 @@ class _DragBar(QFrame):
             self.btn_max.setToolTip(i18n.t("window_maximize"))
             self.btn_max.setCursor(PointingHandCursor)
             self.btn_max.setFocusPolicy(NoFocus)
-            self.btn_max.setFixedSize(32, 28)
+            self.btn_max.setFixedSize(btn_w, btn_h)
             self.btn_max.clicked.connect(self._toggle_max)
             row.addWidget(self.btn_max, 0)
 
@@ -120,7 +130,7 @@ class _DragBar(QFrame):
         btn_close.setToolTip(i18n.t("close_action"))
         btn_close.setCursor(PointingHandCursor)
         btn_close.setFocusPolicy(NoFocus)
-        btn_close.setFixedSize(32, 28)
+        btn_close.setFixedSize(btn_w, btn_h)
         # QDialog → reject(); QMainWindow / other top-levels → close().
         if isinstance(host, QDialog):
             btn_close.clicked.connect(host.reject)

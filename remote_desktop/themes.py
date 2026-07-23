@@ -1402,10 +1402,18 @@ QFrame#dialogTitleBar {{
     border-top-left-radius: 14px;
     border-top-right-radius: 14px;
 }}
+QFrame#dialogTitleBar[compact="true"] {{
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}}
 QLabel#dialogCaption {{
     color: {c.text};
     font-size: 13px;
     font-weight: 700;
+}}
+QFrame#dialogTitleBar[compact="true"] QLabel#dialogCaption {{
+    font-size: 12px;
+    font-weight: 600;
 }}
 QPushButton#dialogClose {{
     background: transparent;
@@ -1415,6 +1423,10 @@ QPushButton#dialogClose {{
     font-size: 18px;
     font-weight: 700;
     padding: 0;
+}}
+QFrame#dialogTitleBar[compact="true"] QPushButton#dialogClose {{
+    border-radius: 6px;
+    font-size: 15px;
 }}
 QPushButton#dialogClose:hover {{
     background: {c.btn_hover};

@@ -276,7 +276,7 @@ class ViewerChromeBar(QFrame):
         # Colors come from the app stylesheet (themes.py) so settings theme changes apply.
         self.setAttribute(WA_StyledBackground, True)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 8, 18, 10)
+        lay.setContentsMargins(10, 6, 12, 6)
         lay.setSpacing(8)
 
         self.btn_send = QPushButton(i18n.t("viewer_send_file"))
@@ -358,7 +358,12 @@ class RemoteClientWindow(QMainWindow):
         layout.setSpacing(0)
 
         self._drag = DialogDragBar(
-            self, config.window_title, "info", False, window_controls=True
+            self,
+            config.window_title,
+            "info",
+            False,
+            window_controls=True,
+            compact=True,
         )
         layout.addWidget(self._drag)
 
@@ -371,9 +376,9 @@ class RemoteClientWindow(QMainWindow):
         layout.addWidget(self.canvas, 1)
         self.setCentralWidget(self._central)
 
-        # Hidden by default; reveal when mouse touches the top edge.
+        # Overlay the canvas only — never cover the custom title bar.
         self.chrome_bar = ViewerChromeBar(
-            self._central,
+            self.canvas,
             on_toggle=self._toggle_fullscreen,
             on_send_file=self._pick_and_send_file,
             on_browse_files=self._open_remote_files,
@@ -483,8 +488,8 @@ class RemoteClientWindow(QMainWindow):
         self.chrome_bar.btn_send.setEnabled(can_files)
         self.chrome_bar.btn_browse.setEnabled(can_files)
         self.chrome_bar.btn_term.setEnabled(FEATURE_TERMINAL in self._features)
-        w = max(1, self._central.width())
-        self.chrome_bar.setGeometry(0, 0, w, 48)
+        w = max(1, self.canvas.width())
+        self.chrome_bar.setGeometry(0, 0, w, 40)
         self.chrome_bar.raise_()
         self.chrome_bar.show()
 
