@@ -17,6 +17,7 @@ from .qt_bind import (
     AlignLeft,
     AlignTop,
     ControlModifier,
+    qt_has_flag,
     Key_Backspace,
     Key_Delete,
     Key_Down,
@@ -60,14 +61,7 @@ def _key_bytes(event) -> bytes:
     key = event.key()
     text = event.text() or ""
     mods = event.modifiers()
-    ctrl = False
-    try:
-        ctrl = bool(int(mods) & int(ControlModifier))
-    except Exception:
-        try:
-            ctrl = bool(mods & ControlModifier)
-        except Exception:
-            ctrl = False
+    ctrl = qt_has_flag(mods, ControlModifier)
 
     mapping = (
         (Key_Return, b"\r"),

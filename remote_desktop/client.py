@@ -73,7 +73,10 @@ from .qt_bind import (
     WindowShortcut,
     black,
     event_pos,
+    qt_enum_int,
+    qt_has_flag,
     qt_key_constants,
+    qt_key_in,
 )
 
 log = logging.getLogger(__name__)
@@ -200,7 +203,11 @@ class RemoteCanvas(QWidget):
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         # Clipboard hotkeys are handled by the parent window; don't inject them.
         mods = event.modifiers()
-        if (mods & ControlModifier) and (mods & AltModifier) and event.key() in {Key_C, Key_V}:
+        if (
+            qt_has_flag(mods, ControlModifier)
+            and qt_has_flag(mods, AltModifier)
+            and qt_key_in(event.key(), Key_C, Key_V)
+        ):
             event.ignore()
             return
         if self.on_local_key is not None and self.on_local_key(event):
@@ -209,9 +216,9 @@ class RemoteCanvas(QWidget):
         # Ctrl+V in viewer = paste on remote: push local clipboard first.
         if (
             not event.isAutoRepeat()
-            and (mods & ControlModifier)
-            and not (mods & AltModifier)
-            and event.key() == Key_V
+            and qt_has_flag(mods, ControlModifier)
+            and not qt_has_flag(mods, AltModifier)
+            and qt_key_in(event.key(), Key_V)
             and self.on_before_remote_paste is not None
         ):
             self.on_before_remote_paste()
@@ -221,15 +228,19 @@ class RemoteCanvas(QWidget):
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         mods = event.modifiers()
-        if (mods & ControlModifier) and (mods & AltModifier) and event.key() in {Key_C, Key_V}:
+        if (
+            qt_has_flag(mods, ControlModifier)
+            and qt_has_flag(mods, AltModifier)
+            and qt_key_in(event.key(), Key_C, Key_V)
+        ):
             event.ignore()
             return
         # Keep local chrome keys off the remote OS.
-        if event.key() == Key_F11:
+        if qt_key_in(event.key(), Key_F11):
             event.accept()
             return
         win = self.host_window
-        if event.key() == Key_Escape and win is not None and win._swallow_esc_up:
+        if qt_key_in(event.key(), Key_Escape) and win is not None and win._swallow_esc_up:
             win._swallow_esc_up = False
             event.accept()
             return
@@ -413,10 +424,10 @@ class RemoteClientWindow(QMainWindow):
     def _handle_local_key(self, event: QKeyEvent) -> bool:
         if event.isAutoRepeat():
             return False
-        if event.key() == Key_F11:
+        if qt_key_in(event.key(), Key_F11):
             self._toggle_fullscreen()
             return True
-        if event.key() == Key_Escape and self.isFullScreen():
+        if qt_key_in(event.key(), Key_Escape) and self.isFullScreen():
             self._swallow_esc_up = True
             self._set_fullscreen(False)
             return True
@@ -938,14 +949,25 @@ def _qt_key_name(event: QKeyEvent) -> str:
         return _KEY_CONSTANTS[key]
     # Under Ctrl/Alt, event.text() is often a control char (e.g. Ctrl+V -> \x16).
     # Prefer physical letter/digit key codes so remote paste/copy actually works.
-    if Key_A <= key <= Key_Z:
-        return chr(ord("a") + int(key - Key_A))
-    if Key_0 <= key <= Key_9:
-        return chr(ord("0") + int(key - Key_0))
+    try:
+        key_i = qt_enum_int(key)
+        a_i = qt_enum_int(Key_A)
+        z_i = qt_enum_int(Key_Z)
+        zero_i = qt_enum_int(Key_0)
+        nine_i = qt_enum_int(Key_9)
+    except (TypeError, ValueError):
+        key_i = a_i = z_i = zero_i = nine_i = None
+    if key_i is not None and a_i is not None and z_i is not None and a_i <= key_i <= z_i:
+        return chr(ord("a") + (key_i - a_i))
+    if key_i is not None and zero_i is not None and nine_i is not None and zero_i <= key_i <= nine_i:
+        return chr(ord("0") + (key_i - zero_i))
     text = event.text()
     if text and len(text) == 1 and text.isprintable():
         return text
-    name = QKeySequence(key).toString().lower()
+    try:
+        name = QKeySequence(qt_enum_int(key) if key_i is None else key_i).toString().lower()
+    except Exception:
+        name = QKeySequence(key).toString().lower()
     # Strip accidental modifier prefixes from QKeySequence.
     if name.startswith("ctrl+") or name.startswith("alt+") or name.startswith("shift+"):
         name = name.split("+")[-1]

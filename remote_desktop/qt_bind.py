@@ -475,6 +475,18 @@ def menu_exec(menu: QMenu, position: Any = None) -> Any:
     return fn(position)
 
 
+# Qt5/Qt6 KeyboardModifier bit values (stable across versions).
+_MODIFIER_BITS = {
+    "NoModifier": 0x00000000,
+    "ShiftModifier": 0x02000000,
+    "ControlModifier": 0x04000000,
+    "AltModifier": 0x08000000,
+    "MetaModifier": 0x10000000,
+    "KeypadModifier": 0x20000000,
+    "GroupSwitchModifier": 0x40000000,
+}
+
+
 def qt_enum_int(value: Any) -> int:
     """PySide2 enums often reject implicit int(); normalize for constructors/compare."""
     if isinstance(value, int) and not isinstance(value, bool):
@@ -492,9 +504,28 @@ def qt_enum_int(value: Any) -> int:
         except (TypeError, ValueError):
             continue
     try:
+        import operator
+
+        return int(operator.index(value))
+    except Exception:
+        pass
+    try:
         return int(getattr(value, "__int__")())
     except Exception as exc:
         raise TypeError("cannot convert %r to int" % (value,)) from exc
+
+
+def _modifier_bit(flag: Any) -> int:
+    """Resolve a single KeyboardModifier member to its bit value."""
+    try:
+        return qt_enum_int(flag)
+    except (TypeError, ValueError):
+        pass
+    text = str(flag)
+    for name, bits in _MODIFIER_BITS.items():
+        if text.endswith(name) or text == name:
+            return int(bits)
+    raise TypeError("cannot convert modifier %r to int" % (flag,))
 
 
 def qt_enum_eq(left: Any, right: Any) -> bool:
@@ -502,6 +533,30 @@ def qt_enum_eq(left: Any, right: Any) -> bool:
         return left == right or qt_enum_int(left) == qt_enum_int(right)
     except (TypeError, ValueError):
         return False
+
+
+def qt_has_flag(flags: Any, flag: Any) -> bool:
+    """Safe ``flags & flag`` for PySide2 KeyboardModifier / StateFlag enums."""
+    try:
+        return bool(qt_enum_int(flags) & _modifier_bit(flag))
+    except (TypeError, ValueError):
+        pass
+    # Some PySide2 builds allow ``|`` / equality but reject ``int()`` / ``&``.
+    try:
+        return (flags | flag) == flags
+    except Exception:
+        pass
+    try:
+        return bool(flags & flag)
+    except Exception:
+        return False
+
+
+def qt_key_in(key: Any, *candidates: Any) -> bool:
+    for candidate in candidates:
+        if qt_enum_eq(key, candidate):
+            return True
+    return False
 
 
 def make_window_flags(*flags: Any) -> Any:
