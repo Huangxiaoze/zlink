@@ -78,6 +78,7 @@ class _DragBar(QFrame):
         window_controls: bool = False,
         compact: bool = False,
         on_fullscreen: Optional[Callable[[], None]] = None,
+        on_hover: Optional[Callable[[bool], None]] = None,
     ) -> None:
         super().__init__(host)
         self._host = host
@@ -85,6 +86,7 @@ class _DragBar(QFrame):
         self._window_controls = bool(window_controls)
         self._compact = bool(compact)
         self._on_fullscreen = on_fullscreen
+        self._on_hover = on_hover
         self.setObjectName("dialogTitleBar")
         self.setAttribute(WA_StyledBackground, True)
         # Keep kind/danger for callers; accent stripe was removed as visual noise.
@@ -179,6 +181,16 @@ class _DragBar(QFrame):
         else:
             self.btn_max.setText("□")
             self.btn_max.setToolTip(i18n.t("window_maximize"))
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        if self._on_hover is not None:
+            self._on_hover(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if self._on_hover is not None:
+            self._on_hover(False)
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if qt_enum_eq(event.button(), LeftButton) and not self._host.isMaximized():

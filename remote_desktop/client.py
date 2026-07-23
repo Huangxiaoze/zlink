@@ -356,6 +356,7 @@ class RemoteClientWindow(QMainWindow):
             window_controls=True,
             compact=True,
             on_fullscreen=self._toggle_fullscreen,
+            on_hover=self._on_title_hover,
         )
         layout.addWidget(self._drag)
 
@@ -442,14 +443,16 @@ class RemoteClientWindow(QMainWindow):
         self._set_fullscreen(not self.isFullScreen())
 
     def _set_fullscreen(self, enabled: bool) -> None:
-        self._hide_chrome_bar()
+        self._chrome_hide_timer.stop()
+        self._chrome_hover = False
+        self.chrome_bar.hide()
         if enabled:
+            self._drag.hide()
             self.showFullScreen()
         else:
             self.showNormal()
-        # Keep the caption bar visible so exit-fullscreen stays next to window controls.
-        self._drag.show()
-        self._drag.sync_fullscreen_btn(enabled)
+            self._drag.show()
+        self._drag.sync_fullscreen_btn(bool(enabled))
         self.canvas.setFocus(MouseFocusReason)
 
     def _on_canvas_mouse_y(self, y: float) -> None:
@@ -458,6 +461,12 @@ class RemoteClientWindow(QMainWindow):
             self._show_chrome_bar()
         elif not self._chrome_hover and y > self.chrome_bar.height() + 8:
             self._chrome_hide_timer.start(280)
+
+    def _on_title_hover(self, hovering: bool) -> None:
+        # Only used while fullscreen, when the caption is temporarily revealed.
+        if not self.isFullScreen():
+            return
+        self._on_chrome_hover(hovering)
 
     def _on_chrome_hover(self, hovering: bool) -> None:
         self._chrome_hover = hovering
@@ -469,6 +478,10 @@ class RemoteClientWindow(QMainWindow):
 
     def _show_chrome_bar(self) -> None:
         self._chrome_hide_timer.stop()
+        # In fullscreen, temporarily reveal the caption so exit-fullscreen is reachable.
+        if self.isFullScreen():
+            self._drag.sync_fullscreen_btn(True)
+            self._drag.show()
         self.chrome_bar.btn_send.setText(i18n.t("viewer_send_file"))
         self.chrome_bar.btn_browse.setText(i18n.t("viewer_browse_files"))
         self.chrome_bar.btn_term.setText(i18n.t("viewer_terminal"))
@@ -485,6 +498,8 @@ class RemoteClientWindow(QMainWindow):
         self._chrome_hide_timer.stop()
         self._chrome_hover = False
         self.chrome_bar.hide()
+        if self.isFullScreen():
+            self._drag.hide()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
