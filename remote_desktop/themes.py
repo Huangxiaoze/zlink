@@ -1054,6 +1054,11 @@ def build_stylesheet(theme_id: str | None = None) -> str:
     primary_pressed = _shade(c.accent_2, 0.82)
     danger_pressed = _shade(c.danger_hover, 0.85)
     ghost_pressed = _shade(c.ghost_hover, 0.88)
+    header_group_bg = _rgba(c.input_bg, 0.72)
+    header_action_hover = _rgba(c.btn_hover, 0.95)
+    header_primary_bg = _rgba(c.accent, 0.14)
+    header_primary_hover = _rgba(c.accent, 0.22)
+    header_primary_pressed = _rgba(c.accent, 0.30)
     # Light accents (e.g. noir) need dark label text; dark accents keep white.
     on_accent = _contrast_text(c.accent)
     on_accent_2 = _contrast_text(c.accent_2)
@@ -1110,6 +1115,49 @@ QLabel#pageTitle {{
     color: {c.text};
     font-size: 22px;
     font-weight: 800;
+}}
+QFrame#headerActionGroup {{
+    background: {header_group_bg};
+    border: 1px solid {c.line};
+    border-radius: 12px;
+}}
+QPushButton#headerActionBtn {{
+    background: transparent;
+    color: {c.muted};
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 26px;
+}}
+QPushButton#headerActionBtn:hover {{
+    background: {header_action_hover};
+    color: {c.text};
+}}
+QPushButton#headerActionBtn:pressed {{
+    background: {btn_pressed};
+    color: {c.text};
+    padding: 6px 12px;
+}}
+QPushButton#headerActionPrimary {{
+    background: {header_primary_bg};
+    color: {c.accent};
+    border: none;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    min-height: 26px;
+}}
+QPushButton#headerActionPrimary:hover {{
+    background: {header_primary_hover};
+    color: {c.accent_2};
+}}
+QPushButton#headerActionPrimary:pressed {{
+    background: {header_primary_pressed};
+    color: {c.accent_2};
+    padding: 6px 14px;
 }}
 QLabel#pageSub, QLabel#pageMuted, QLabel#statusBar, QLabel#cardHint {{
     color: {c.muted};
