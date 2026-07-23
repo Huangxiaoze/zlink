@@ -15,9 +15,22 @@ _ICO_NAME = "app.ico"
 
 def _candidate_dirs() -> Iterable[Path]:
     here = Path(__file__).resolve().parent
-    repo = here.parent
-    yield repo / "resources" / "icon"
-    yield here / "resources" / "icon"
+    seen: set[Path] = set()
+
+    # Dev layout: repo root contains main.py and resources/icon (e.g. remote/zlink/ui/…).
+    for base in (here, *here.parents):
+        icon_dir = base / "resources" / "icon"
+        if icon_dir.is_dir():
+            resolved = icon_dir.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                yield icon_dir
+        if (base / "main.py").is_file():
+            break
+
+    legacy = here / "resources" / "icon"
+    if legacy.is_dir() and legacy.resolve() not in seen:
+        yield legacy
 
     if getattr(sys, "frozen", False):
         meipass = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
