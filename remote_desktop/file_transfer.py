@@ -81,6 +81,17 @@ def pack_download_error(path: str, error: str) -> bytes:
     )
 
 
+# Win32 FILE_ATTRIBUTE_* bits (from GetFileAttributes / DirEntry.stat).
+_FILE_ATTRIBUTE_HIDDEN = 0x2
+_FILE_ATTRIBUTE_SYSTEM = 0x4
+# Soft safety cap while scanning huge folders (sorted before trimming).
+_MAX_SCAN_ENTRIES = 5000
+
+
+def _is_windows() -> bool:
+    return platform.system().lower() == "windows"
+
+
 def _windows_drive_letters() -> list[str]:
     """Return present drive letters without touching each volume (avoids DVD/network hangs)."""
     try:
@@ -97,11 +108,47 @@ def _windows_drive_letters() -> list[str]:
     return letters
 
 
+def _normalize_windows_path_text(text: str) -> str:
+    """Fix controller/host path quirks so Windows listing targets the right folder.
+
+    Important: bare ``C:`` is *not* the drive root on Windows — Path('C:') is
+    relative to the process cwd on that drive, which makes the browser show a
+    completely wrong folder.
+    """
+    text = (text or "").strip().strip('"')
+    if not text:
+        return text
+    # Controllers may send POSIX separators.
+    text = text.replace("/", "\\")
+    # ``C:`` → ``C:\`` (drive root).
+    if len(text) == 2 and text[0].isalpha() and text[1] == ":":
+        return text[0].upper() + ":\\"
+    # ``C:Users\...`` (missing slash after drive) → ``C:\Users\...``
+    if len(text) >= 3 and text[0].isalpha() and text[1] == ":" and text[2] != "\\":
+        text = text[0].upper() + ":\\" + text[2:]
+    # Keep drive roots with a trailing slash (``C:`` / ``C:.`` style).
+    if len(text) == 2 and text[1] == ":":
+        text += "\\"
+    return text
+
+
+def path_to_remote_str(path: Path | str) -> str:
+    """Serialize a host path for the FILE protocol (stable Windows drive roots)."""
+    if isinstance(path, Path):
+        text = str(path)
+    else:
+        text = str(path or "")
+    if _is_windows():
+        text = _normalize_windows_path_text(text)
+        if len(text) == 2 and text[1] == ":":
+            text += "\\"
+    return text
+
+
 def browse_roots() -> list[dict[str, Any]]:
     """Top-level browse targets on the host OS."""
     roots: list[dict[str, Any]] = []
-    system = platform.system().lower()
-    if system == "windows":
+    if _is_windows():
         for letter in _windows_drive_letters():
             roots.append(
                 {
@@ -126,7 +173,7 @@ def browse_roots() -> list[dict[str, Any]]:
     roots.append(
         {
             "name": home.name or str(home),
-            "path": str(home),
+            "path": path_to_remote_str(home),
             "is_dir": True,
             "size": 0,
             "mtime": 0,
@@ -136,9 +183,11 @@ def browse_roots() -> list[dict[str, Any]]:
 
 
 def resolve_browse_path(path: str | None) -> Path:
-    text = (path or "").strip()
+    text = (path or "").strip().strip('"')
     if not text:
         return Path.home()
+    if _is_windows():
+        text = _normalize_windows_path_text(text)
     return Path(text).expanduser()
 
 
@@ -163,8 +212,10 @@ def remote_parent_path(path: str | None) -> str:
         (len(text) >= 2 and text[0].isalpha() and text[1] == ":")
         or text.startswith("\\\\")
         or text.startswith("//")
+        or ("\\" in text)
     )
-    if looks_win or ("\\" in text):
+    if looks_win:
+        text = text.replace("/", "\\")
         p = PureWindowsPath(text)
         parent = p.parent
         if parent == p:
@@ -180,6 +231,47 @@ def remote_parent_path(path: str | None) -> str:
     return str(parent)
 
 
+def _entry_is_dir(entry: os.DirEntry) -> bool:
+    """Directory check that also treats Windows junctions as folders."""
+    try:
+        if entry.is_dir(follow_symlinks=False):
+            return True
+    except TypeError:
+        try:
+            if entry.is_dir():
+                return True
+        except OSError:
+            pass
+    except OSError:
+        pass
+    try:
+        is_junction = getattr(entry, "is_junction", None)
+        if callable(is_junction) and bool(is_junction()):
+            return True
+    except OSError:
+        pass
+    try:
+        if entry.is_symlink() and entry.is_dir(follow_symlinks=True):
+            return True
+    except (TypeError, OSError):
+        pass
+    return False
+
+
+def _windows_hidden_or_system(entry: os.DirEntry, st: os.stat_result | None) -> bool:
+    """Match Explorer's default view: hide Hidden/System items."""
+    attrs = 0
+    if st is not None:
+        attrs = int(getattr(st, "st_file_attributes", 0) or 0)
+    if not attrs:
+        try:
+            st2 = entry.stat(follow_symlinks=False)
+            attrs = int(getattr(st2, "st_file_attributes", 0) or 0)
+        except OSError:
+            return False
+    return bool(attrs & (_FILE_ATTRIBUTE_HIDDEN | _FILE_ATTRIBUTE_SYSTEM))
+
+
 def list_directory(path: str | None) -> tuple[str, list[dict[str, Any]]]:
     """List a host directory. Empty path returns browse roots.
 
@@ -193,6 +285,7 @@ def list_directory(path: str | None) -> tuple[str, list[dict[str, Any]]]:
     target = resolve_browse_path(text)
     try:
         # Avoid resolve() symlink walk when possible — absolute is enough for browse.
+        # Never resolve bare drive roots through cwd (``C:`` quirk handled above).
         if not target.is_absolute():
             target = target.resolve()
     except OSError as exc:
@@ -203,27 +296,33 @@ def list_directory(path: str | None) -> tuple[str, list[dict[str, Any]]]:
         raise NotADirectoryError(str(target))
 
     collected: list[tuple[bool, str, dict[str, Any]]] = []
+    windows = _is_windows()
     try:
         with os.scandir(str(target)) as it:
             for entry in it:
                 try:
-                    is_dir = entry.is_dir(follow_symlinks=False)
-                    size = 0
-                    mtime = 0
+                    st = None
                     try:
                         st = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        st = None
+                    if windows and _windows_hidden_or_system(entry, st):
+                        continue
+                    is_dir = _entry_is_dir(entry)
+                    size = 0
+                    mtime = 0
+                    if st is not None:
                         if not is_dir:
                             size = int(st.st_size)
                         mtime = int(st.st_mtime)
-                    except OSError:
-                        pass
+                    entry_path = getattr(entry, "path", None) or str(target / entry.name)
                     collected.append(
                         (
                             is_dir,
-                            entry.name.lower(),
+                            entry.name.casefold() if windows else entry.name.lower(),
                             {
                                 "name": entry.name,
-                                "path": str(Path(target) / entry.name),
+                                "path": path_to_remote_str(entry_path),
                                 "is_dir": bool(is_dir),
                                 "size": size,
                                 "mtime": mtime,
@@ -232,15 +331,14 @@ def list_directory(path: str | None) -> tuple[str, list[dict[str, Any]]]:
                     )
                 except OSError:
                     continue
-                # Soft cap while scanning so huge directories don't stall the host.
-                if len(collected) >= MAX_LIST_ENTRIES * 2:
+                if len(collected) >= _MAX_SCAN_ENTRIES:
                     break
     except OSError as exc:
         raise PermissionError(str(exc)) from exc
 
     collected.sort(key=lambda item: (0 if item[0] else 1, item[1]))
     entries = [item[2] for item in collected[:MAX_LIST_ENTRIES]]
-    return str(target), entries
+    return path_to_remote_str(target), entries
 
 
 def unique_dest(folder: Path, name: str) -> Path:

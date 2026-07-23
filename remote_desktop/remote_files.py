@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, List, Optional
 
 from .confirm_dialog import DialogDragBar, make_frameless_dialog
@@ -415,9 +415,20 @@ class RemoteFileBrowser(QDialog):
             return
         self._start_download(entry)
 
+    def _remote_name(self, path: str, fallback: str = "") -> str:
+        """Basename of a remote path without using the controller OS Path rules."""
+        text = (path or "").strip()
+        if not text:
+            return fallback
+        if (len(text) >= 2 and text[0].isalpha() and text[1] == ":") or ("\\" in text):
+            name = PureWindowsPath(text.replace("/", "\\")).name
+        else:
+            name = PurePosixPath(text).name
+        return name or fallback
+
     def _start_download(self, entry: dict[str, Any]) -> None:
         path = str(entry.get("path") or "")
-        name = str(entry.get("name") or Path(path).name)
+        name = str(entry.get("name") or self._remote_name(path) or "file.bin")
         size = int(entry.get("size") or 0)
         if not path:
             return

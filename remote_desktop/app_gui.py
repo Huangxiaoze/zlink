@@ -1127,6 +1127,8 @@ class MainWindow(QMainWindow):
         threading.Thread(target=worker, name="host-remote-list", daemon=True).start()
 
     def _handle_remote_download_request(self, meta: dict) -> None:
+        from .file_transfer import resolve_browse_path
+
         path = str(meta.get("path") or "")
         if self._file_sending:
             try:
@@ -1136,7 +1138,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             return
-        src = Path(path)
+        src = resolve_browse_path(path)
         if not src.is_file():
             try:
                 self._enqueue_host_file(
