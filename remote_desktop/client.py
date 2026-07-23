@@ -60,6 +60,7 @@ from .qt_bind import (
     QApplication,
     QColor,
     QFileDialog,
+    QCursor,
     QFrame,
     QHBoxLayout,
     QImage,
@@ -72,6 +73,8 @@ from .qt_bind import (
     QPen,
     QPixmap,
     QPushButton,
+    QPolygon,
+    QPoint,
     QShortcut,
     QStackedWidget,
     QTabBar,
@@ -137,6 +140,9 @@ class RemoteCanvas(QWidget):
         self._remote_cy = 0.5
         self._show_remote_cursor = False
         self._host_pointer_passive = False
+        self._arrow_cursor_pixmap: QPixmap | None = None
+        self._arrow_cursor_hot_x = 0
+        self._arrow_cursor_hot_y = 0
         self.on_mouse: Optional[Callable[[str, float, float, Dict[str, Any]], None]] = None
         self.on_key: Optional[Callable[[str, str], None]] = None
         # Called before injecting Ctrl+V so local clipboard can be pushed first.
@@ -156,7 +162,8 @@ class RemoteCanvas(QWidget):
         self._remote_cx = max(0.0, min(1.0, float(norm_x)))
         self._remote_cy = max(0.0, min(1.0, float(norm_y)))
         self._show_remote_cursor = True
-        self.update()
+        if self._host_pointer_passive:
+            self.update()
 
     def set_pointer_passive(self, passive: bool) -> None:
         passive = bool(passive)
@@ -166,27 +173,56 @@ class RemoteCanvas(QWidget):
         self.setCursor(BlankCursor if passive else ArrowCursor)
         self.update()
 
+    def _ensure_arrow_cursor_pixmap(self) -> bool:
+        if self._arrow_cursor_pixmap is not None and not self._arrow_cursor_pixmap.isNull():
+            return True
+        try:
+            cur = QCursor(ArrowCursor)
+            pix = cur.pixmap()
+            if pix.isNull():
+                return False
+            hot = cur.hotSpot()
+            self._arrow_cursor_pixmap = pix
+            self._arrow_cursor_hot_x = int(hot.x())
+            self._arrow_cursor_hot_y = int(hot.y())
+            return True
+        except Exception:
+            return False
+
     def _draw_remote_cursor(self, painter: QPainter) -> None:
-        if not self._show_remote_cursor:
+        if not self._show_remote_cursor or not self._host_pointer_passive:
             return
         bx, by, bw, bh = self._blit_rect
         if bw <= 0 or bh <= 0:
             return
         px = bx + self._remote_cx * bw
         py = by + self._remote_cy * bh
+        if self._ensure_arrow_cursor_pixmap():
+            painter.drawPixmap(
+                int(round(px - self._arrow_cursor_hot_x)),
+                int(round(py - self._arrow_cursor_hot_y)),
+                self._arrow_cursor_pixmap,
+            )
+            return
         painter.setRenderHint(Antialiasing, True)
-        outline = QPen(QColor(0, 0, 0, 210))
-        outline.setWidthF(2.0)
-        painter.setPen(outline)
-        painter.setBrush(QColor(255, 255, 255, 230))
-        painter.drawEllipse(int(round(px - 5)), int(round(py - 5)), 10, 10)
-        painter.drawLine(int(round(px - 10)), int(round(py)), int(round(px + 10)), int(round(py)))
-        painter.drawLine(int(round(px)), int(round(py - 10)), int(round(px)), int(round(py + 10)))
-        fill = QPen(QColor(255, 80, 80, 240))
-        fill.setWidthF(1.5)
-        painter.setPen(fill)
-        painter.setBrush(QColor(255, 80, 80, 200))
-        painter.drawEllipse(int(round(px - 2.5)), int(round(py - 2.5)), 5, 5)
+        tip_x = int(round(px))
+        tip_y = int(round(py))
+        pts = [
+            (tip_x, tip_y),
+            (tip_x, tip_y + 16),
+            (tip_x + 4, tip_y + 12),
+            (tip_x + 6, tip_y + 18),
+            (tip_x + 8, tip_y + 17),
+            (tip_x + 6, tip_y + 11),
+            (tip_x + 11, tip_y + 11),
+            (tip_x + 11, tip_y + 8),
+            (tip_x + 6, tip_y + 8),
+            (tip_x + 6, tip_y + 4),
+        ]
+        poly = QPolygon([QPoint(x, y) for x, y in pts])
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        painter.setBrush(QColor(255, 255, 255))
+        painter.drawPolygon(poly)
 
     def focusNextPrevChild(self, _next: bool) -> bool:  # noqa: N802
         # Keep keyboard focus on the canvas so Tab / shortcuts stay remote-bound.

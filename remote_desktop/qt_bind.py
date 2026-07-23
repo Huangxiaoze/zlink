@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from typing import Any
 
 try:
-    from PySide2.QtCore import QEvent, QMimeData, QObject, Qt, QTimer, QUrl, Signal
+    from PySide2.QtCore import QEvent, QMimeData, QObject, QPoint, Qt, QTimer, QUrl, Signal
     from PySide2.QtGui import (
         QBrush,
         QClipboard,
@@ -23,6 +23,8 @@ try:
         QPainter,
         QPen,
         QPixmap,
+        QCursor,
+        QPolygon,
         QWheelEvent,
     )
     from PySide2.QtWidgets import (
@@ -64,7 +66,7 @@ try:
 
     QT_API = "PySide2"
 except ImportError:  # pragma: no cover - modern hosts
-    from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QTimer, QUrl, Signal
+    from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, Qt, QTimer, QUrl, Signal
     from PySide6.QtGui import (
         QAction,
         QBrush,
@@ -82,6 +84,8 @@ except ImportError:  # pragma: no cover - modern hosts
         QPainter,
         QPen,
         QPixmap,
+        QCursor,
+        QPolygon,
         QShortcut,
         QWheelEvent,
     )
