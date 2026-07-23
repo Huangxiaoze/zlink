@@ -1623,19 +1623,8 @@ QPushButton#viewerChromeBtn:pressed {{
     padding: 7px 13px 5px 15px;
 }}
 QPushButton#viewerExitFsBtn {{
-    color: #FFFFFF;
-    background: {_rgba("#000000", 0.42)};
-    border: 1px solid {_rgba("#FFFFFF", 0.28)};
-    border-radius: 14px;
-    padding: 6px 18px;
-    font-size: 12px;
-    font-weight: 600;
-}}
-QPushButton#viewerExitFsBtn:hover {{
-    background: {_rgba("#000000", 0.62)};
-    border-color: {_rgba("#FFFFFF", 0.45)};
-}}
-QPushButton#viewerExitFsBtn:pressed {{
-    background: {_rgba("#000000", 0.72)};
+    background: transparent;
+    border: none;
+    padding: 0;
 }}
 """

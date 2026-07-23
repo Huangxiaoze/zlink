@@ -27,6 +27,7 @@ from .net import Connection, connect_to
 from .protocol import MsgType, ProtocolError, decode_json, unpack_file_message, unpack_frame_message
 from .qt_bind import (
     AltModifier,
+    Antialiasing,
     ControlModifier,
     FastTransformation,
     Format_RGB32,
@@ -42,9 +43,11 @@ from .qt_bind import (
     MiddleButton,
     MouseFocusReason,
     NoFocus,
+    NoPen,
     PointingHandCursor,
     WA_StyledBackground,
     QApplication,
+    QColor,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -259,7 +262,10 @@ class RemoteCanvas(QWidget):
 
 
 class ViewerExitFullscreenButton(QPushButton):
-    """Top-center translucent control shown only while fullscreen."""
+    """Top-center translucent icon control shown only while fullscreen."""
+
+    _W = 44
+    _H = 30
 
     def __init__(
         self,
@@ -272,17 +278,61 @@ class ViewerExitFullscreenButton(QPushButton):
         self.setObjectName("viewerExitFsBtn")
         self.setCursor(PointingHandCursor)
         self.setFocusPolicy(NoFocus)
-        self.setText(i18n.t("viewer_exit_fullscreen"))
+        self.setFixedSize(self._W, self._H)
+        self.setText("")
+        self.setToolTip(i18n.t("viewer_exit_fullscreen"))
         self.clicked.connect(on_exit)
         self.hide()
 
     def enterEvent(self, event) -> None:  # noqa: N802
         self._on_hover(True)
+        self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         self._on_hover(False)
+        self.update()
         super().leaveEvent(event)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(Antialiasing, True)
+        hovered = bool(self.underMouse())
+        bg = QColor(0, 0, 0, 165 if hovered else 105)
+        border = QColor(255, 255, 255, 100 if hovered else 60)
+        painter.setBrush(bg)
+        painter.setPen(border)
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 15, 15)
+
+        # Compact "exit fullscreen" glyph: four corner brackets pointing inward.
+        ink = QColor(255, 255, 255, 235 if hovered else 210)
+        cx = self.width() * 0.5
+        cy = self.height() * 0.5
+        box = 11.0
+        arm = 4.5
+        thick = 2.0
+        left = cx - box * 0.5
+        right = cx + box * 0.5
+        top = cy - box * 0.5
+        bottom = cy + box * 0.5
+        painter.setPen(NoPen)
+        painter.setBrush(ink)
+
+        def bar(x: float, y: float, w: float, h: float) -> None:
+            painter.drawRoundedRect(x, y, w, h, 0.8, 0.8)
+
+        # top-left
+        bar(left, top, arm, thick)
+        bar(left, top, thick, arm)
+        # top-right
+        bar(right - arm, top, arm, thick)
+        bar(right - thick, top, thick, arm)
+        # bottom-left
+        bar(left, bottom - thick, arm, thick)
+        bar(left, bottom - arm, thick, arm)
+        # bottom-right
+        bar(right - arm, bottom - thick, arm, thick)
+        bar(right - thick, bottom - arm, thick, arm)
 
 
 class ViewerChromeBar(QFrame):
@@ -506,10 +556,9 @@ class RemoteClientWindow(QMainWindow):
             self._chrome_hide_timer.start(350)
 
     def _place_exit_fs_btn(self) -> None:
-        self._exit_fs_btn.setText(i18n.t("viewer_exit_fullscreen"))
-        self._exit_fs_btn.adjustSize()
-        bw = max(120, self._exit_fs_btn.sizeHint().width() + 8)
-        bh = max(28, self._exit_fs_btn.sizeHint().height())
+        self._exit_fs_btn.setToolTip(i18n.t("viewer_exit_fullscreen"))
+        bw = int(self._exit_fs_btn._W)
+        bh = int(self._exit_fs_btn._H)
         cw = max(1, self.canvas.width())
         self._exit_fs_btn.setGeometry(max(0, (cw - bw) // 2), 8, bw, bh)
         self._exit_fs_btn.raise_()
@@ -531,8 +580,8 @@ class RemoteClientWindow(QMainWindow):
         self.chrome_bar.btn_browse.setEnabled(can_files)
         self.chrome_bar.btn_term.setEnabled(FEATURE_TERMINAL in self._features)
         w = max(1, self.canvas.width())
-        # Leave room for the centered exit pill while fullscreen.
-        y = 44 if self.isFullScreen() else 0
+        # Leave room for the centered exit icon while fullscreen.
+        y = 42 if self.isFullScreen() else 0
         self.chrome_bar.setGeometry(0, y, w, 40)
         self.chrome_bar.raise_()
         self.chrome_bar.show()
