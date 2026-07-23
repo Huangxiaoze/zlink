@@ -544,7 +544,14 @@ class RemoteClientWindow(QMainWindow):
         # Same reveal gesture in windowed and fullscreen modes.
         if y <= self._chrome_edge_px:
             self._show_chrome_bar()
-        elif not self._chrome_hover and y > self.chrome_bar.height() + 8:
+            return
+        if self._chrome_hover:
+            return
+        if self.isFullScreen():
+            edge = self._exit_fs_btn.height() + 16
+        else:
+            edge = self.chrome_bar.height() + 8
+        if y > edge:
             self._chrome_hide_timer.start(280)
 
     def _on_chrome_hover(self, hovering: bool) -> None:
@@ -565,13 +572,15 @@ class RemoteClientWindow(QMainWindow):
 
     def _show_chrome_bar(self) -> None:
         self._chrome_hide_timer.stop()
-        # Fullscreen never shows the title bar — only a top-center exit pill.
+        # Fullscreen: only the exit icon. Windowed: file/terminal chrome bar.
         if self.isFullScreen():
             self._drag.hide()
+            self.chrome_bar.hide()
             self._place_exit_fs_btn()
             self._exit_fs_btn.show()
-        else:
-            self._exit_fs_btn.hide()
+            return
+
+        self._exit_fs_btn.hide()
         self.chrome_bar.btn_send.setText(i18n.t("viewer_send_file"))
         self.chrome_bar.btn_browse.setText(i18n.t("viewer_browse_files"))
         self.chrome_bar.btn_term.setText(i18n.t("viewer_terminal"))
@@ -580,13 +589,9 @@ class RemoteClientWindow(QMainWindow):
         self.chrome_bar.btn_browse.setEnabled(can_files)
         self.chrome_bar.btn_term.setEnabled(FEATURE_TERMINAL in self._features)
         w = max(1, self.canvas.width())
-        # Leave room for the centered exit icon while fullscreen.
-        y = 42 if self.isFullScreen() else 0
-        self.chrome_bar.setGeometry(0, y, w, 40)
+        self.chrome_bar.setGeometry(0, 0, w, 40)
         self.chrome_bar.raise_()
         self.chrome_bar.show()
-        if self.isFullScreen():
-            self._exit_fs_btn.raise_()
 
     def _hide_chrome_bar(self) -> None:
         self._chrome_hide_timer.stop()
