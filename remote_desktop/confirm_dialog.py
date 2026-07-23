@@ -27,6 +27,7 @@ from .qt_bind import (
     dialog_exec,
     make_window_flags,
     qt_enum_eq,
+    qt_has_flag,
 )
 from .toggle_switch import ToggleSwitch
 
@@ -46,29 +47,30 @@ def _global_pos(event):
 
 
 def _make_frameless(
-    dialog: QDialog,
+    window: QWidget,
     modal: bool = True,
     *,
     as_window: bool = False,
 ) -> None:
-    """Drop the native Windows title bar; use in-dialog chrome instead.
+    """Drop the native title bar; use in-window chrome instead.
 
     ``as_window=True`` uses Qt.Window so minimize/maximize work (needed for
-    long-lived tool windows like the remote terminal).
+    long-lived tool windows like the remote terminal / viewer).
     """
     # PySide2 needs Qt.WindowFlags(...), not enum|enum or a plain int.
     base = WindowTypeFlag if as_window else DialogWindow
-    dialog.setWindowFlags(make_window_flags(base, FramelessWindowHint))
-    dialog.setAttribute(WA_StyledBackground, True)
-    dialog.setModal(bool(modal))
+    window.setWindowFlags(make_window_flags(base, FramelessWindowHint))
+    window.setAttribute(WA_StyledBackground, True)
+    if isinstance(window, QDialog):
+        window.setModal(bool(modal))
 
 
 class _DragBar(QFrame):
-    """Caption strip that can drag a frameless dialog."""
+    """Caption strip that can drag a frameless dialog/window."""
 
     def __init__(
         self,
-        host: QDialog,
+        host: QWidget,
         title: str,
         kind: str = "info",
         danger: bool = False,
@@ -119,7 +121,11 @@ class _DragBar(QFrame):
         btn_close.setCursor(PointingHandCursor)
         btn_close.setFocusPolicy(NoFocus)
         btn_close.setFixedSize(32, 28)
-        btn_close.clicked.connect(host.reject)
+        # QDialog → reject(); QMainWindow / other top-levels → close().
+        if isinstance(host, QDialog):
+            btn_close.clicked.connect(host.reject)
+        else:
+            btn_close.clicked.connect(host.close)
         row.addWidget(btn_close, 0)
         self._sync_max_btn()
 
@@ -146,10 +152,9 @@ class _DragBar(QFrame):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
-        pressed = False
         try:
-            pressed = bool(event.buttons() & LeftButton)
-        except TypeError:
+            pressed = qt_has_flag(event.buttons(), LeftButton)
+        except Exception:
             pressed = self._drag_offset is not None
         if self._drag_offset is not None and pressed and not self._host.isMaximized():
             self._host.move(_global_pos(event) - self._drag_offset)

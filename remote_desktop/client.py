@@ -10,7 +10,7 @@ from . import PROTOCOL_VERSION
 from .clipboard_sync import ClipboardBridge
 from .config import ClientConfig
 from .app_icon import apply_app_icon
-from .confirm_dialog import ask_confirm, show_warning
+from .confirm_dialog import DialogDragBar, ask_confirm, make_frameless_dialog, show_warning
 from .file_transfer import (
     FEATURE_FILE_TRANSFER,
     FileAssembler,
@@ -346,6 +346,8 @@ class RemoteClientWindow(QMainWindow):
         # Set by main window when quitting the whole app (skip confirm once).
         self.force_close = False
 
+        self.setObjectName("confirmDialog")
+        make_frameless_dialog(self, modal=False, as_window=True)
         self.setWindowTitle(config.window_title)
         self.resize(1280, 720)
         apply_app_icon(self)
@@ -354,6 +356,11 @@ class RemoteClientWindow(QMainWindow):
         layout = QVBoxLayout(self._central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        self._drag = DialogDragBar(
+            self, config.window_title, "info", False, window_controls=True
+        )
+        layout.addWidget(self._drag)
 
         self.canvas = RemoteCanvas()
         self.canvas.host_window = self
@@ -407,6 +414,8 @@ class RemoteClientWindow(QMainWindow):
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         apply_window_chrome(self, CURRENT)
+        # DWM caption tint often sticks only after the native handle is fully mapped.
+        QTimer.singleShot(0, lambda: apply_window_chrome(self, CURRENT))
 
     def _hotkey_push_clipboard(self) -> None:
         if self._clip is not None:
@@ -439,8 +448,10 @@ class RemoteClientWindow(QMainWindow):
     def _set_fullscreen(self, enabled: bool) -> None:
         self._hide_chrome_bar()
         if enabled:
+            self._drag.hide()
             self.showFullScreen()
         else:
+            self._drag.show()
             self.showNormal()
         self.canvas.setFocus(MouseFocusReason)
 
@@ -531,10 +542,12 @@ class RemoteClientWindow(QMainWindow):
     def _on_status(self, text: str) -> None:
         # Keep connection hints in the window title; no on-canvas HUD.
         text = (text or "").strip()
-        if text:
-            self.setWindowTitle("%s — %s" % (self._base_title, text))
-        else:
-            self.setWindowTitle(self._base_title)
+        caption = "%s — %s" % (self._base_title, text) if text else self._base_title
+        self.setWindowTitle(caption)
+        try:
+            self._drag.lbl_title.setText(caption)
+        except RuntimeError:
+            pass
 
     def _on_frame_jpeg(self, jpeg: object, meta: object) -> None:
         with self._lock:

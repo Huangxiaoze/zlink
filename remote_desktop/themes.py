@@ -1389,7 +1389,7 @@ QScrollBar::handle:vertical {{
     border-radius: 4px;
     min-height: 30px;
 }}
-QDialog#confirmDialog {{
+QDialog#confirmDialog, QMainWindow#confirmDialog {{
     background: {c.card};
     color: {c.text};
     border: 1px solid {c.line};

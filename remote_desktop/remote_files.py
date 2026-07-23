@@ -174,7 +174,7 @@ class RemoteFileBrowser(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("confirmDialog")
-        make_frameless_dialog(self)
+        make_frameless_dialog(self, modal=False, as_window=True)
         self.setWindowTitle(i18n.t("remote_files_title"))
         self.setMinimumSize(680, 440)
         self.resize(760, 520)
@@ -187,7 +187,9 @@ class RemoteFileBrowser(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(DialogDragBar(self, i18n.t("remote_files_title"), "info", False))
+        root.addWidget(
+            DialogDragBar(self, i18n.t("remote_files_title"), "info", False, window_controls=True)
+        )
 
         body = QWidget()
         body_l = QVBoxLayout(body)

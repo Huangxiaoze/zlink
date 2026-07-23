@@ -1315,6 +1315,7 @@ class MainWindow(QMainWindow):
 
         win.destroyed.connect(_drop)
         win.show()
+        apply_window_chrome(win, THEME)
         win.start()
         if device_id:
             self.store.touch_connected(device_id)
@@ -1387,6 +1388,7 @@ class MainWindow(QMainWindow):
 
         win.destroyed.connect(_drop)
         win.show()
+        apply_window_chrome(win, THEME)
         win.start()
         if device_id:
             self.store.touch_connected(device_id)
