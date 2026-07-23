@@ -715,6 +715,52 @@ def make_window_flags(*flags: Any) -> Any:
     return value
 
 
+def make_alignment(*flags: Any) -> Any:
+    """Combine alignment flags for ``QBoxLayout.addWidget`` on PySide2 and PySide6."""
+    if not flags:
+        raise ValueError("need at least one alignment flag")
+
+    try:
+        combined = flags[0]
+        for flag in flags[1:]:
+            combined = combined | flag
+        if not isinstance(combined, int):
+            return combined
+    except TypeError:
+        combined = None
+
+    value = int(combined) if isinstance(combined, int) else 0
+    if not isinstance(combined, int):
+        for flag in flags:
+            value |= qt_enum_int(flag)
+
+    alignment = getattr(Qt, "Alignment", None)
+    if alignment is not None:
+        try:
+            return alignment(value)
+        except TypeError:
+            pass
+
+    if QT_API == "PySide2":
+        try:
+            return Qt.Alignment(value)  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            pass
+
+    try:
+        combined = flags[0]
+        for flag in flags[1:]:
+            combined = combined | flag
+        if not isinstance(combined, int):
+            return combined
+    except TypeError:
+        pass
+
+    if alignment is not None:
+        return alignment(value)
+    return value
+
+
 def make_dialog_button_box(*buttons: Any) -> QDialogButtonBox:
     """Create QDialogButtonBox on both PySide2 and PySide6.
 

@@ -54,6 +54,7 @@ from .qt_bind import (
     WA_Hover,
     dialog_exec,
     make_dialog_button_box,
+    make_alignment,
     menu_exec,
     qt_enum_eq,
     qt_has_flag,
@@ -761,9 +762,9 @@ class MainWindow(QMainWindow):
         header = QHBoxLayout()
         header.setSpacing(10)
         header.setContentsMargins(0, 0, 0, 0)
-        vcenter = qt_enum_int(AlignVCenter)
-        align_left = qt_enum_int(AlignLeft) | vcenter
-        align_right = qt_enum_int(AlignRight) | vcenter
+        vcenter = make_alignment(AlignVCenter)
+        align_left = make_alignment(AlignLeft, AlignVCenter)
+        align_right = make_alignment(AlignRight, AlignVCenter)
 
         self.lbl_list_title = QLabel()
         self.lbl_list_title.setObjectName("pageTitle")
