@@ -19,7 +19,7 @@
 
 #define MyAppPublisher "ZLink"
 #define MyAppExeName "ZLink.exe"
-#define MyAppURL "https://github.com/Huangxiaoze/remote_desktop"
+#define MyAppURL "https://github.com/Huangxiaoze/zlink"
 #define MyAppId "{{A7C8E2F1-4B3D-4E9A-9C21-6D8F0B5A1E33}"
 
 [Setup]

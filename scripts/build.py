@@ -318,7 +318,7 @@ def _build_deb(version: str) -> int:
             """\
             Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
             Upstream-Name: %s
-            Source: https://github.com/Huangxiaoze/remote_desktop
+            Source: https://github.com/Huangxiaoze/zlink
 
             Files: *
             Copyright: 2026 Huangxiaoze
@@ -358,7 +358,7 @@ def _build_deb(version: str) -> int:
         Installed-Size: %d
         Depends: libc6, libx11-6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libxcb-xinerama0, libglib2.0-0, libdbus-1-3, libfontconfig1, libfreetype6, libxrender1, libxi6, libsm6, libice6, libgl1 | libgl1-mesa-glx
         Recommends: fonts-noto-cjk | fonts-wqy-microhei
-        Homepage: https://github.com/Huangxiaoze/remote_desktop
+        Homepage: https://github.com/Huangxiaoze/zlink
         Description: Cross-platform remote desktop (host + client)
          ZLink provides a Qt device-manager GUI for hosting and
          controlling remote desktops over a direct TCP connection.
