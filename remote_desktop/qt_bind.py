@@ -51,7 +51,10 @@ try:
         QStyle,
         QStyledItemDelegate,
         QStyleOptionViewItem,
+        QStackedWidget,
         QSystemTrayIcon,
+        QTabBar,
+        QTabWidget,
         QTableWidget,
         QTableWidgetItem,
         QVBoxLayout,
@@ -106,7 +109,10 @@ except ImportError:  # pragma: no cover - modern hosts
         QStyle,
         QStyledItemDelegate,
         QStyleOptionViewItem,
+        QStackedWidget,
         QSystemTrayIcon,
+        QTabBar,
+        QTabWidget,
         QTableWidget,
         QTableWidgetItem,
         QVBoxLayout,
@@ -233,6 +239,10 @@ AlignVCenter = _enum(
     getattr(Qt, "AlignVCenter", None),
     getattr(getattr(Qt, "AlignmentFlag", None), "AlignVCenter", None),
 )
+ElideRight = _enum(
+    getattr(Qt, "ElideRight", None),
+    getattr(getattr(Qt, "TextElideMode", None), "ElideRight", None),
+)
 Fixed = _enum(
     getattr(QHeaderView, "Fixed", None),
     getattr(getattr(QHeaderView, "ResizeMode", None), "Fixed", None),
@@ -296,6 +306,10 @@ Antialiasing = _enum(
 NoPen = _enum(
     getattr(Qt, "NoPen", None),
     getattr(getattr(Qt, "PenStyle", None), "NoPen", None),
+)
+TabBarRightSide = _enum(
+    getattr(QTabBar, "RightSide", None),
+    getattr(getattr(QTabBar, "ButtonPosition", None), "RightSide", None),
 )
 SolidLine = _enum(
     getattr(Qt, "SolidLine", None),

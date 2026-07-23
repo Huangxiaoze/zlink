@@ -10,7 +10,15 @@ from . import PROTOCOL_VERSION
 from .clipboard_sync import ClipboardBridge
 from .config import ClientConfig
 from .app_icon import apply_app_icon
-from .confirm_dialog import DialogDragBar, ask_confirm, make_frameless_dialog, show_warning
+from .confirm_dialog import (
+    ICON_ADD,
+    DialogDragBar,
+    WindowChromeButton,
+    ask_confirm,
+    make_frameless_dialog,
+    show_warning,
+)
+from .themes import CURRENT
 from .file_transfer import (
     FEATURE_FILE_TRANSFER,
     FileAssembler,
@@ -20,7 +28,6 @@ from .file_transfer import (
 from .remote_files import RemoteFileBrowser
 from .terminal_pty import FEATURE_TERMINAL
 from .terminal_view import RemoteTerminalWindow
-from .themes import CURRENT
 from .window_chrome import apply_window_chrome, ensure_windows_app_id
 from .i18n import i18n
 from .net import Connection, connect_to
@@ -29,6 +36,7 @@ from .qt_bind import (
     AltModifier,
     Antialiasing,
     ControlModifier,
+    ElideRight,
     FastTransformation,
     Format_RGB32,
     KeepAspectRatio,
@@ -58,18 +66,24 @@ from .qt_bind import (
     QMouseEvent,
     QObject,
     QPainter,
+    QPen,
     QPixmap,
     QPushButton,
     QShortcut,
+    QStackedWidget,
+    QTabBar,
     QTimer,
     QVBoxLayout,
     QWheelEvent,
     QWidget,
     RightButton,
+    RoundCap,
     Signal,
     SmoothPixmapTransform,
     SmoothTransformation,
+    SolidLine,
     StrongFocus,
+    TabBarRightSide,
     WA_NoSystemBackground,
     WA_OpaquePaintEvent,
     WA_TransparentForMouseEvents,
@@ -117,7 +131,7 @@ class RemoteCanvas(QWidget):
         self.on_before_remote_paste: Optional[Callable[[], None]] = None
         # Local chrome keys (fullscreen); return True to swallow.
         self.on_local_key: Optional[Callable[[QKeyEvent], bool]] = None
-        self.host_window: Optional["RemoteClientWindow"] = None
+        self.host_window: Optional["RemoteClientPage"] = None
         self.setAttribute(WA_OpaquePaintEvent, True)
         self.setAttribute(WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
@@ -387,10 +401,21 @@ class ViewerChromeBar(QFrame):
         super().leaveEvent(event)
 
 
-class RemoteClientWindow(QMainWindow):
-    def __init__(self, config: ClientConfig, parent: Optional[QWidget] = None) -> None:
+class RemoteClientPage(QWidget):
+    """One remote-desktop session page (embedded in ViewerShell tabs)."""
+
+    caption_changed = Signal(str)
+
+    def __init__(
+        self,
+        config: ClientConfig,
+        shell: Optional["ViewerShell"] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self.config = config
+        self._shell = shell
+        self.device_id: Optional[str] = None
         self._stop = threading.Event()
         self._conn: Optional[Connection] = None
         self._bus = FrameBus()
@@ -402,6 +427,7 @@ class RemoteClientWindow(QMainWindow):
         self._mouse_move_interval_s = 1.0 / 30.0  # throttle move flood
         self._clip: Optional[ClipboardBridge] = None
         self._base_title = config.window_title
+        self._tab_label = self._short_tab_label(config.window_title)
         self._swallow_esc_up = False
         self._chrome_edge_px = 10
         self._chrome_hover = False
@@ -411,30 +437,10 @@ class RemoteClientWindow(QMainWindow):
         self._file_send_stop = threading.Event()
         self._file_browser: Optional[RemoteFileBrowser] = None
         self._terminal: Optional[RemoteTerminalWindow] = None
-        # Set by main window when quitting the whole app (skip confirm once).
-        self.force_close = False
 
-        self.setObjectName("confirmDialog")
-        make_frameless_dialog(self, modal=False, as_window=True)
-        self.setWindowTitle(config.window_title)
-        self.resize(1280, 720)
-        apply_app_icon(self)
-
-        self._central = QWidget()
-        layout = QVBoxLayout(self._central)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        self._drag = DialogDragBar(
-            self,
-            config.window_title,
-            "info",
-            False,
-            window_controls=True,
-            compact=True,
-            on_fullscreen=self._toggle_fullscreen,
-        )
-        layout.addWidget(self._drag)
 
         self.canvas = RemoteCanvas()
         self.canvas.host_window = self
@@ -443,9 +449,7 @@ class RemoteClientWindow(QMainWindow):
         self.canvas.on_before_remote_paste = self._before_remote_paste
         self.canvas.on_local_key = self._handle_local_key
         layout.addWidget(self.canvas, 1)
-        self.setCentralWidget(self._central)
 
-        # Overlay the canvas only — never cover the custom title bar.
         self.chrome_bar = ViewerChromeBar(
             self.canvas,
             on_send_file=self._pick_and_send_file,
@@ -489,11 +493,21 @@ class RemoteClientWindow(QMainWindow):
         self._sc_pull.setContext(WindowShortcut)
         self._sc_pull.activated.connect(self._hotkey_pull_clipboard)
 
-    def showEvent(self, event) -> None:  # noqa: N802
-        super().showEvent(event)
-        apply_window_chrome(self, CURRENT)
-        # DWM caption tint often sticks only after the native handle is fully mapped.
-        QTimer.singleShot(0, lambda: apply_window_chrome(self, CURRENT))
+    @staticmethod
+    def _short_tab_label(title: str) -> str:
+        text = (title or "").strip()
+        if " — " in text:
+            text = text.split(" — ", 1)[-1].strip()
+        elif " - " in text:
+            text = text.split(" - ", 1)[-1].strip()
+        return text or i18n.t("viewer_tab_unnamed")
+
+    def tab_label(self) -> str:
+        return self._tab_label
+
+    def isFullScreen(self) -> bool:  # noqa: N802 — match QWidget API used below
+        shell = self._shell
+        return bool(shell is not None and shell.isFullScreen())
 
     def _hotkey_push_clipboard(self) -> None:
         if self._clip is not None:
@@ -524,21 +538,27 @@ class RemoteClientWindow(QMainWindow):
         self._set_fullscreen(not self.isFullScreen())
 
     def _set_fullscreen(self, enabled: bool) -> None:
+        shell = self._shell
+        if shell is None:
+            return
+        shell.set_fullscreen(bool(enabled))
         self._chrome_hide_timer.stop()
         self._chrome_hover = False
         self.chrome_bar.hide()
         self._exit_fs_btn.hide()
         if enabled:
-            self._drag.hide()
-            self.showFullScreen()
-            # Peek the exit control briefly so users notice it.
             self._show_chrome_bar()
             self._chrome_hide_timer.start(1600)
-        else:
-            self.showNormal()
-            self._drag.show()
-        self._drag.sync_fullscreen_btn(bool(enabled))
         self.canvas.setFocus(MouseFocusReason)
+
+    def on_shell_fullscreen_changed(self, enabled: bool) -> None:
+        self._chrome_hide_timer.stop()
+        self._chrome_hover = False
+        self.chrome_bar.hide()
+        self._exit_fs_btn.hide()
+        if enabled and self.isVisible():
+            self._show_chrome_bar()
+            self._chrome_hide_timer.start(1600)
 
     def _on_canvas_mouse_y(self, y: float) -> None:
         # Same reveal gesture in windowed and fullscreen modes.
@@ -574,7 +594,6 @@ class RemoteClientWindow(QMainWindow):
         self._chrome_hide_timer.stop()
         # Fullscreen: only the exit icon. Windowed: file/terminal chrome bar.
         if self.isFullScreen():
-            self._drag.hide()
             self.chrome_bar.hide()
             self._place_exit_fs_btn()
             self._exit_fs_btn.show()
@@ -598,8 +617,6 @@ class RemoteClientWindow(QMainWindow):
         self._chrome_hover = False
         self.chrome_bar.hide()
         self._exit_fs_btn.hide()
-        if self.isFullScreen():
-            self._drag.hide()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -612,26 +629,37 @@ class RemoteClientWindow(QMainWindow):
         self._net_thread.start()
         self._bus.status.emit(i18n.t("viewer_connecting"))
 
-    def closeEvent(self, event) -> None:  # noqa: N802
-        if not self.force_close:
-            title = self._base_title or self.windowTitle()
-            if not ask_confirm(
-                self,
-                title=i18n.t("close_viewer_title"),
-                message=i18n.t("close_viewer_confirm", title=title),
-                eyebrow=i18n.t("brand"),
-                ok_text=i18n.t("close_action"),
-                cancel_text=i18n.t("keep_open"),
-                danger=True,
-            ):
-                event.ignore()
-                return
-        self._shutdown()
-        super().closeEvent(event)
+    def confirm_and_close(self) -> bool:
+        """Ask the user, then shut down. Returns False if cancelled."""
+        title = self._base_title or self.tab_label()
+        if not ask_confirm(
+            self.window() or self,
+            title=i18n.t("close_viewer_title"),
+            message=i18n.t("close_viewer_confirm", title=title),
+            eyebrow=i18n.t("brand"),
+            ok_text=i18n.t("close_action"),
+            cancel_text=i18n.t("keep_open"),
+            danger=True,
+        ):
+            return False
+        self.shutdown()
+        return True
 
-    def _shutdown(self) -> None:
+    def shutdown(self) -> None:
         self._stop.set()
         self._stop_clipboard()
+        if self._terminal is not None:
+            try:
+                self._terminal.force_close()
+            except RuntimeError:
+                pass
+            self._terminal = None
+        if self._file_browser is not None:
+            try:
+                self._file_browser.close()
+            except RuntimeError:
+                pass
+            self._file_browser = None
         conn = self._conn
         if conn:
             try:
@@ -648,14 +676,9 @@ class RemoteClientWindow(QMainWindow):
             self._clip = None
 
     def _on_status(self, text: str) -> None:
-        # Keep connection hints in the window title; no on-canvas HUD.
         text = (text or "").strip()
         caption = "%s — %s" % (self._base_title, text) if text else self._base_title
-        self.setWindowTitle(caption)
-        try:
-            self._drag.lbl_title.setText(caption)
-        except RuntimeError:
-            pass
+        self.caption_changed.emit(caption)
 
     def _on_frame_jpeg(self, jpeg: object, meta: object) -> None:
         with self._lock:
@@ -1095,6 +1118,335 @@ def _qt_key_name(event: QKeyEvent) -> str:
     return name or str(key)
 
 
+class ViewerTabCloseButton(QPushButton):
+    """Compact tab close control — soft disc + thin X (not the stock QTabBar glyph)."""
+
+    def __init__(self, tab_bar: QTabBar) -> None:
+        super().__init__(tab_bar)
+        self._tab_bar = tab_bar
+        self.setObjectName("viewerTabCloseBtn")
+        self.setFixedSize(16, 16)
+        self.setCursor(PointingHandCursor)
+        self.setFocusPolicy(NoFocus)
+        self.setToolTip(i18n.t("close_action"))
+        self.clicked.connect(self._on_clicked)
+
+    def _on_clicked(self) -> None:
+        for i in range(self._tab_bar.count()):
+            if self._tab_bar.tabButton(i, TabBarRightSide) is self:
+                self._tab_bar.tabCloseRequested.emit(i)
+                return
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(Antialiasing, True)
+        cx = self.width() * 0.5
+        cy = self.height() * 0.5
+        if self.isDown():
+            painter.setPen(NoPen)
+            painter.setBrush(QColor(CURRENT.danger))
+            painter.drawEllipse(int(round(cx - 7)), int(round(cy - 7)), 14, 14)
+            ink = QColor(255, 255, 255)
+        elif self.underMouse():
+            painter.setPen(NoPen)
+            painter.setBrush(QColor(CURRENT.btn_hover))
+            painter.drawEllipse(int(round(cx - 7)), int(round(cy - 7)), 14, 14)
+            ink = QColor(CURRENT.text)
+        else:
+            ink = QColor(CURRENT.muted)
+        pen = QPen(ink)
+        pen.setWidthF(1.2)
+        pen.setStyle(SolidLine)
+        pen.setCapStyle(RoundCap)
+        painter.setPen(pen)
+        d = 3.0
+        painter.drawLine(
+            int(round(cx - d)), int(round(cy - d)), int(round(cx + d)), int(round(cy + d))
+        )
+        painter.drawLine(
+            int(round(cx + d)), int(round(cy - d)), int(round(cx - d)), int(round(cy + d))
+        )
+
+
+class ViewerShell(QMainWindow):
+    """Single frameless window; session tabs live in the custom title bar."""
+
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        *,
+        on_add_remote: Optional[Callable[[], None]] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.force_close = False
+        self._on_add_remote = on_add_remote
+        self.setObjectName("confirmDialog")
+        make_frameless_dialog(self, modal=False, as_window=True)
+        self.setWindowTitle(i18n.t("viewer_shell_title"))
+        self.resize(1280, 720)
+        apply_app_icon(self)
+
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.tab_bar = QTabBar()
+        self.tab_bar.setObjectName("viewerTabBar")
+        self.tab_bar.setDocumentMode(True)
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setDrawBase(False)
+        # Custom close buttons via setTabButton (stock QTabBar close glyph is ugly).
+        self.tab_bar.setTabsClosable(False)
+        self.tab_bar.setMovable(True)
+        self.tab_bar.setElideMode(ElideRight)
+        self.tab_bar.currentChanged.connect(self._on_current_changed)
+        self.tab_bar.tabCloseRequested.connect(self._on_tab_close_requested)
+        self.tab_bar.tabMoved.connect(self._on_tab_moved)
+
+        tab_cluster = QWidget()
+        tab_cluster.setObjectName("viewerTabCluster")
+        cluster_l = QHBoxLayout(tab_cluster)
+        cluster_l.setContentsMargins(0, 0, 0, 0)
+        cluster_l.setSpacing(2)
+        cluster_l.addWidget(self.tab_bar, 0)
+
+        self.btn_add_tab = WindowChromeButton(
+            ICON_ADD,
+            tab_cluster,
+            object_name="viewerAddTabBtn",
+            width=24,
+            height=22,
+        )
+        self.btn_add_tab.setToolTip(i18n.t("viewer_show_main"))
+        self.btn_add_tab.clicked.connect(self._request_add_remote)
+        self.btn_add_tab.setVisible(self._on_add_remote is not None)
+        cluster_l.addWidget(self.btn_add_tab, 0)
+
+        self._drag = DialogDragBar(
+            self,
+            i18n.t("viewer_shell_title"),
+            "info",
+            False,
+            window_controls=True,
+            compact=True,
+            on_fullscreen=self._toggle_fullscreen,
+            content_widget=tab_cluster,
+        )
+        layout.addWidget(self._drag)
+
+        self.stack = QStackedWidget()
+        self.stack.setObjectName("viewerStack")
+        layout.addWidget(self.stack, 1)
+        self.setCentralWidget(central)
+
+    def set_on_add_remote(self, callback: Optional[Callable[[], None]]) -> None:
+        self._on_add_remote = callback
+        try:
+            self.btn_add_tab.setVisible(callback is not None)
+            self.btn_add_tab.setToolTip(i18n.t("viewer_show_main"))
+        except RuntimeError:
+            pass
+
+    def _request_add_remote(self) -> None:
+        if self._on_add_remote is not None:
+            self._on_add_remote()
+
+    def _install_tab_close(self, index: int) -> None:
+        btn = ViewerTabCloseButton(self.tab_bar)
+        self.tab_bar.setTabButton(index, TabBarRightSide, btn)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_window_chrome(self, CURRENT)
+        QTimer.singleShot(0, lambda: apply_window_chrome(self, CURRENT))
+
+    def pages(self) -> list[RemoteClientPage]:
+        out: list[RemoteClientPage] = []
+        for i in range(self.stack.count()):
+            page = self.stack.widget(i)
+            if isinstance(page, RemoteClientPage):
+                out.append(page)
+        return out
+
+    def find_page(
+        self,
+        host: str,
+        port: int,
+        device_id: Optional[str],
+    ) -> Optional[RemoteClientPage]:
+        host_key = host.strip().lower()
+        port_key = int(port)
+        for page in self.pages():
+            try:
+                win_host = str(page.config.net.host).strip().lower()
+                win_port = int(page.config.net.port)
+                win_id = getattr(page, "device_id", None)
+            except RuntimeError:
+                continue
+            if device_id and win_id and win_id == device_id:
+                return page
+            if win_host == host_key and win_port == port_key:
+                return page
+        return None
+
+    def focus_page(self, page: RemoteClientPage) -> None:
+        idx = self.stack.indexOf(page)
+        if idx >= 0:
+            self.tab_bar.setCurrentIndex(idx)
+            self.stack.setCurrentIndex(idx)
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        page.canvas.setFocus(MouseFocusReason)
+
+    def add_session(
+        self,
+        config: ClientConfig,
+        device_id: Optional[str] = None,
+    ) -> RemoteClientPage:
+        page = RemoteClientPage(config, shell=self, parent=self.stack)
+        page.device_id = device_id
+        page.caption_changed.connect(lambda text, p=page: self._on_page_caption(p, text))
+        idx = self.stack.addWidget(page)
+        self.tab_bar.insertTab(idx, page.tab_label())
+        self.tab_bar.setTabToolTip(idx, config.window_title)
+        self._install_tab_close(idx)
+        self.tab_bar.setCurrentIndex(idx)
+        self.stack.setCurrentIndex(idx)
+        page.start()
+        self._sync_chrome_title()
+        return page
+
+    def _on_page_caption(self, page: RemoteClientPage, caption: str) -> None:
+        idx = self.stack.indexOf(page)
+        if idx < 0:
+            return
+        self.tab_bar.setTabToolTip(idx, caption)
+        if self.tab_bar.currentIndex() == idx:
+            self._sync_chrome_title()
+
+    def _on_current_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        self.stack.setCurrentIndex(index)
+        self._sync_chrome_title()
+        page = self.stack.widget(index)
+        if isinstance(page, RemoteClientPage):
+            page.canvas.setFocus(MouseFocusReason)
+
+    def _on_tab_moved(self, from_index: int, to_index: int) -> None:
+        page = self.stack.widget(from_index)
+        if page is None:
+            return
+        self.stack.blockSignals(True)
+        self.stack.removeWidget(page)
+        self.stack.insertWidget(to_index, page)
+        self.stack.setCurrentIndex(self.tab_bar.currentIndex())
+        self.stack.blockSignals(False)
+
+    def _sync_chrome_title(self) -> None:
+        idx = self.tab_bar.currentIndex()
+        page = self.stack.currentWidget()
+        if isinstance(page, RemoteClientPage) and idx >= 0:
+            caption = self.tab_bar.tabToolTip(idx) or page.tab_label()
+        elif self.stack.count() <= 1:
+            caption = i18n.t("viewer_shell_title")
+        else:
+            caption = "%s (%d)" % (i18n.t("viewer_shell_title"), self.stack.count())
+        self.setWindowTitle(caption)
+
+    def _toggle_fullscreen(self) -> None:
+        self.set_fullscreen(not self.isFullScreen())
+
+    def set_fullscreen(self, enabled: bool) -> None:
+        if enabled:
+            self._drag.hide()
+            self.showFullScreen()
+        else:
+            self.showNormal()
+            self._drag.show()
+        self._drag.sync_fullscreen_btn(bool(enabled))
+        for page in self.pages():
+            page.on_shell_fullscreen_changed(bool(enabled))
+        page = self.stack.currentWidget()
+        if isinstance(page, RemoteClientPage):
+            page.canvas.setFocus(MouseFocusReason)
+
+    def _on_tab_close_requested(self, index: int) -> None:
+        page = self.stack.widget(index)
+        if not isinstance(page, RemoteClientPage):
+            self.tab_bar.removeTab(index)
+            if page is not None:
+                self.stack.removeWidget(page)
+            return
+        if not page.confirm_and_close():
+            return
+        self.tab_bar.removeTab(index)
+        self.stack.removeWidget(page)
+        page.deleteLater()
+        if self.stack.count() == 0:
+            self.force_close = True
+            self.close()
+        else:
+            self._sync_chrome_title()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        pages = self.pages()
+        if not self.force_close and pages:
+            if len(pages) == 1:
+                title = pages[0]._base_title or pages[0].tab_label()
+                ok = ask_confirm(
+                    self,
+                    title=i18n.t("close_viewer_title"),
+                    message=i18n.t("close_viewer_confirm", title=title),
+                    eyebrow=i18n.t("brand"),
+                    ok_text=i18n.t("close_action"),
+                    cancel_text=i18n.t("keep_open"),
+                    danger=True,
+                )
+            else:
+                ok = ask_confirm(
+                    self,
+                    title=i18n.t("close_viewer_all_title"),
+                    message=i18n.t("close_viewer_all_confirm"),
+                    eyebrow=i18n.t("brand"),
+                    ok_text=i18n.t("close_action"),
+                    cancel_text=i18n.t("keep_open"),
+                    danger=True,
+                )
+            if not ok:
+                event.ignore()
+                return
+        for page in pages:
+            page.shutdown()
+        super().closeEvent(event)
+
+
+class RemoteClientWindow(ViewerShell):
+    """CLI / compatibility wrapper: one session in the shared tab shell."""
+
+    def __init__(self, config: ClientConfig, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.config = config
+        self._page = self.add_session(config, device_id=None)
+        self.device_id = None
+
+    def start(self) -> None:
+        # Session already started by add_session().
+        return
+
+
 class RemoteClient:
     """CLI entry: run Qt viewer as a standalone application."""
 
@@ -1112,7 +1464,6 @@ class RemoteClient:
         win = RemoteClientWindow(self.config)
         win.show()
         apply_window_chrome(win, CURRENT)
-        win.start()
         # PySide2: exec_(); PySide6: exec()
         fn = getattr(app, "exec_", None) or getattr(app, "exec")
         fn()

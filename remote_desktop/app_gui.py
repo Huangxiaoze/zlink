@@ -52,7 +52,7 @@ from .qt_bind import (
     qt_has_flag,
 )
 
-from .client import RemoteClientWindow
+from .client import RemoteClientPage, ViewerShell
 from .clipboard_sync import ClipboardBridge
 from .config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamConfig
 from .devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_device
@@ -448,7 +448,7 @@ class MainWindow(QMainWindow):
         self._host: RemoteHost | None = None
         self._host_thread: threading.Thread | None = None
         self._probe_stop = threading.Event()
-        self._viewers: list[RemoteClientWindow] = []
+        self._viewer_shell: ViewerShell | None = None
         self._terminals: list[DirectTerminalWindow] = []
         self._host_clip: ClipboardBridge | None = None
         self._host_clip_timer: QTimer | None = None
@@ -655,7 +655,7 @@ class MainWindow(QMainWindow):
         self.btn_win_min.setToolTip(i18n.t("window_minimize"))
         self.btn_win_min.clicked.connect(self.showMinimized)
         self.btn_win_close = WindowChromeButton(
-            ICON_CLOSE, self, object_name="windowChromeBtn", width=32, height=28
+            ICON_CLOSE, self, object_name="windowCloseBtn", width=36, height=28
         )
         self.btn_win_close.setToolTip(i18n.t("close_action"))
         self.btn_win_close.clicked.connect(self.close)
@@ -1021,9 +1021,9 @@ class MainWindow(QMainWindow):
         self._restyle(self.status, "statusBar")
         self._restyle(self.lbl_search, "pageMuted")
         apply_window_chrome(self, THEME)
-        for viewer in list(self._viewers):
+        if self._viewer_shell is not None:
             try:
-                apply_window_chrome(viewer, THEME)
+                apply_window_chrome(self._viewer_shell, THEME)
             except RuntimeError:
                 pass
         for term in list(self._terminals):
@@ -1330,40 +1330,69 @@ class MainWindow(QMainWindow):
         else:
             self._launch_client(host, DEFAULT_PORT, password, host, device_id)
 
+    def _ensure_viewer_shell(self) -> ViewerShell:
+        shell = self._viewer_shell
+        if shell is not None:
+            try:
+                # Touch a Qt property to detect deleted C++ wrappers.
+                _ = shell.isVisible()
+                return shell
+            except RuntimeError:
+                self._viewer_shell = None
+
+        shell = ViewerShell(
+            parent=None,
+            on_add_remote=self._bring_main_to_front,
+        )
+        shell.setAttribute(WA_DeleteOnClose, True)
+
+        def _drop(*_: object) -> None:
+            if self._viewer_shell is shell:
+                self._viewer_shell = None
+
+        shell.destroyed.connect(_drop)
+        self._viewer_shell = shell
+        shell.show()
+        apply_window_chrome(shell, THEME)
+        return shell
+
+    def _bring_main_to_front(self) -> None:
+        try:
+            if self.isMinimized():
+                self.showNormal()
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            app = QApplication.instance()
+            if app is not None:
+                app.setActiveWindow(self)
+        except RuntimeError:
+            return
+
     def _find_viewer(
         self,
         host: str,
         port: int,
         device_id: str | None,
-    ) -> RemoteClientWindow | None:
-        host_key = host.strip().lower()
-        port_key = int(port)
-        for win in list(self._viewers):
-            try:
-                win_host = str(win.config.net.host).strip().lower()
-                win_port = int(win.config.net.port)
-                win_id = getattr(win, "device_id", None)
-            except RuntimeError:
-                # C++ object already deleted.
-                if win in self._viewers:
-                    self._viewers.remove(win)
-                continue
-            if device_id and win_id and win_id == device_id:
-                return win
-            if win_host == host_key and win_port == port_key:
-                return win
-        return None
-
-    def _focus_viewer(self, win: RemoteClientWindow, title: str) -> None:
+    ) -> RemoteClientPage | None:
+        shell = self._viewer_shell
+        if shell is None:
+            return None
         try:
-            if win.isMinimized():
-                win.showNormal()
-            win.show()
-            win.raise_()
-            win.activateWindow()
+            return shell.find_page(host, port, device_id)
+        except RuntimeError:
+            self._viewer_shell = None
+            return None
+
+    def _focus_viewer(self, page: RemoteClientPage, title: str) -> None:
+        shell = self._viewer_shell
+        if shell is None:
+            return
+        try:
+            shell.focus_page(page)
             app = QApplication.instance()
             if app is not None:
-                app.setActiveWindow(win)
+                app.setActiveWindow(shell)
         except RuntimeError:
             return
         self._set_status(i18n.t("viewer_focus_existing", title=title))
@@ -1395,19 +1424,13 @@ class MainWindow(QMainWindow):
             window_title=i18n.t("viewer_title", name=title),
             reconnect=True,
         )
-        win = RemoteClientWindow(cfg, parent=None)
-        win.device_id = device_id
-        win.setAttribute(WA_DeleteOnClose, True)
-        self._viewers.append(win)
-
-        def _drop(*_: object, window: RemoteClientWindow = win) -> None:
-            if window in self._viewers:
-                self._viewers.remove(window)
-
-        win.destroyed.connect(_drop)
-        win.show()
-        apply_window_chrome(win, THEME)
-        win.start()
+        shell = self._ensure_viewer_shell()
+        try:
+            page = shell.add_session(cfg, device_id=device_id)
+            shell.focus_page(page)
+        except RuntimeError:
+            self._viewer_shell = None
+            return
         if device_id:
             self.store.touch_connected(device_id)
             self._reload_devices()
@@ -1525,12 +1548,14 @@ class MainWindow(QMainWindow):
         self._stop_host_clipboard()
         if self._host is not None:
             self._stop_host()
-        for win in list(self._viewers):
+        shell = self._viewer_shell
+        if shell is not None:
             try:
-                win.force_close = True
-                win.close()
+                shell.force_close = True
+                shell.close()
             except RuntimeError:
                 pass
+            self._viewer_shell = None
         for win in list(self._terminals):
             try:
                 win.force_close()

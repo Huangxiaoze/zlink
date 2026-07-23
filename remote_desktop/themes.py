@@ -1415,7 +1415,8 @@ QFrame#dialogTitleBar[compact="true"] QLabel#dialogCaption {{
     font-size: 12px;
     font-weight: 600;
 }}
-QPushButton#dialogClose, QPushButton#windowChromeBtn {{
+QPushButton#dialogClose, QPushButton#windowChromeBtn, QPushButton#windowCloseBtn,
+QPushButton#viewerAddTabBtn {{
     background: transparent;
     color: {c.muted};
     border: none;
@@ -1424,20 +1425,35 @@ QPushButton#dialogClose, QPushButton#windowChromeBtn {{
     font-weight: 700;
     padding: 0;
 }}
-QFrame#dialogTitleBar[compact="true"] QPushButton#dialogClose {{
+QFrame#dialogTitleBar[compact="true"] QPushButton#dialogClose,
+QFrame#dialogTitleBar[compact="true"] QPushButton#windowCloseBtn,
+QFrame#dialogTitleBar[compact="true"] QPushButton#viewerAddTabBtn {{
     border-radius: 6px;
     font-size: 15px;
 }}
-QPushButton#dialogClose:hover, QPushButton#windowChromeBtn:hover {{
+QPushButton#dialogClose:hover, QPushButton#windowChromeBtn:hover,
+QPushButton#viewerAddTabBtn:hover {{
     background: {c.btn_hover};
     color: {c.text};
 }}
-QPushButton#dialogClose:pressed, QPushButton#windowChromeBtn:pressed {{
+QPushButton#dialogClose:pressed, QPushButton#windowChromeBtn:pressed,
+QPushButton#viewerAddTabBtn:pressed {{
     background: {btn_pressed};
     color: {c.text};
 }}
+QPushButton#windowCloseBtn:hover, QPushButton#windowCloseBtn:pressed {{
+    /* Fill is painted in WindowChromeButton for a solid red caption close. */
+    background: transparent;
+    color: #ffffff;
+}}
 QPushButton#windowChromeBtn {{
     font-size: 16px;
+}}
+QPushButton#viewerAddTabBtn {{
+    border-radius: 6px;
+}}
+QWidget#viewerTabCluster {{
+    background: transparent;
 }}
 QLabel#confirmEyebrow {{
     color: {c.muted};
@@ -1629,5 +1645,46 @@ QPushButton#viewerExitFsBtn {{
     background: transparent;
     border: none;
     padding: 0;
+}}
+QStackedWidget#viewerStack {{
+    background: {c.bg};
+    border: none;
+}}
+QFrame#dialogTitleBar[hasTabs="true"] {{
+    background: {c.card};
+}}
+QTabBar#viewerTabBar {{
+    background: transparent;
+    border: none;
+    qproperty-drawBase: 0;
+}}
+QTabBar#viewerTabBar::tab {{
+    background: transparent;
+    color: {c.muted};
+    border: none;
+    border-radius: 6px;
+    min-width: 72px;
+    max-width: 180px;
+    padding: 3px 4px 3px 10px;
+    margin: 1px 1px 1px 0;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QTabBar#viewerTabBar::tab:selected {{
+    background: {c.btn_hover};
+    color: {c.text};
+}}
+QTabBar#viewerTabBar::tab:hover:!selected {{
+    color: {c.text};
+    background: {c.input_bg};
+}}
+QPushButton#viewerTabCloseBtn {{
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0 2px 0 0;
+}}
+QWidget#dialogTitleDragFill {{
+    background: transparent;
 }}
 """

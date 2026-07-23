@@ -6,7 +6,7 @@
 ;   dist\ZLink-Setup-x.y.z.exe (this script's output)
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.4.0"
+  #define MyAppVersion "0.5.0"
 #endif
 
 #ifndef MyAppName

@@ -83,9 +83,11 @@ QApplication
   ├─ MainWindow（设备管理）
   │    ├─ 后台线程：RemoteHost
   │    └─ 后台线程：在线探测
-  └─ RemoteClientWindow（远程画面，可多开）
-       ├─ 网络线程：收帧 / 心跳
-       └─ QTimer(~16ms)：合并最新 JPEG 后上屏（防闪烁）
+  └─ ViewerShell（单一远程窗口）
+       ├─ 自定义标题栏：会话 Tab + 窗口控制同一行
+       └─ RemoteClientPage × N（QStackedWidget）
+            ├─ 网络线程：收帧 / 心跳
+            └─ QTimer(~16ms)：合并最新 JPEG 后上屏（防闪烁）
 ```
 
 - **所有 Qt import 必须走 `qt_bind.py`**，禁止业务代码直接 `from PySide6...` / `from PySide2...`

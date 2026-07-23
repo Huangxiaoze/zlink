@@ -13,6 +13,7 @@ from .qt_bind import (
     LeftButton,
     MiterJoin,
     NoFocus,
+    NoPen,
     Password,
     PointingHandCursor,
     QCheckBox,
@@ -49,6 +50,7 @@ ICON_RESTORE = "restore"
 ICON_CLOSE = "close"
 ICON_FULLSCREEN = "fullscreen"
 ICON_EXIT_FULLSCREEN = "exit_fullscreen"
+ICON_ADD = "add"
 
 
 def _polish(*widgets: QWidget) -> None:
@@ -111,13 +113,20 @@ def _draw_chrome_icon(painter: QPainter, kind: str, cx: float, cy: float, color:
         return
 
     if kind == ICON_CLOSE:
-        # Crisp X with round caps.
-        painter.setPen(_stroke_pen(color, 1.4, round_caps=True))
-        d = 4.6
+        # Compact geometric X (Win11 caption style).
+        painter.setPen(_stroke_pen(color, 1.35, round_caps=True))
+        d = 4.2
         x0, y0 = int(round(cx - d)), int(round(cy - d))
         x1, y1 = int(round(cx + d)), int(round(cy + d))
         painter.drawLine(x0, y0, x1, y1)
         painter.drawLine(x1, y0, x0, y1)
+        return
+
+    if kind == ICON_ADD:
+        painter.setPen(_stroke_pen(color, 1.55, round_caps=True))
+        arm = 5.0
+        painter.drawLine(int(round(cx - arm)), int(round(cy)), int(round(cx + arm)), int(round(cy)))
+        painter.drawLine(int(round(cx)), int(round(cy - arm)), int(round(cx)), int(round(cy + arm)))
         return
 
     if kind in (ICON_FULLSCREEN, ICON_EXIT_FULLSCREEN):
@@ -166,6 +175,8 @@ class WindowChromeButton(QPushButton):
     ) -> None:
         super().__init__(parent)
         self._kind = kind
+        if kind == ICON_CLOSE and object_name == "dialogClose":
+            object_name = "windowCloseBtn"
         self.setObjectName(object_name)
         self.setText("")
         self.setCursor(PointingHandCursor)
@@ -182,15 +193,40 @@ class WindowChromeButton(QPushButton):
         self._kind = kind
         self.update()
 
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
+        # Close: Win11-style solid red hover/press with a white X.
+        if self._kind == ICON_CLOSE:
+            painter = QPainter(self)
+            painter.setRenderHint(Antialiasing, True)
+            pressed = bool(self.isDown())
+            hovered = bool(self.underMouse())
+            if pressed or hovered:
+                bg = QColor(CURRENT.danger_hover if pressed else CURRENT.danger)
+                painter.setPen(NoPen)
+                painter.setBrush(bg)
+                painter.drawRoundedRect(self.rect(), 6, 6)
+                ink = QColor(255, 255, 255)
+            else:
+                ink = QColor(CURRENT.muted)
+            _draw_chrome_icon(
+                painter, self._kind, self.width() * 0.5, self.height() * 0.5, ink
+            )
+            return
+
         super().paintEvent(event)
         painter = QPainter(self)
-        # Squares look sharper without AA; lines/X prefer AA.
+        # Squares look sharper without AA; lines prefer AA.
         use_aa = self._kind not in (ICON_MAXIMIZE, ICON_RESTORE)
         painter.setRenderHint(Antialiasing, use_aa)
-        if self._kind == ICON_CLOSE and self.underMouse():
-            ink = QColor(CURRENT.danger)
-        elif self.underMouse():
+        if self.underMouse():
             ink = QColor(CURRENT.text)
         else:
             ink = QColor(CURRENT.muted)
@@ -231,6 +267,7 @@ class _DragBar(QFrame):
         show_maximize: bool = True,
         on_fullscreen: Optional[Callable[[], None]] = None,
         on_hover: Optional[Callable[[bool], None]] = None,
+        content_widget: Optional[QWidget] = None,
     ) -> None:
         super().__init__(host)
         self._host = host
@@ -246,9 +283,15 @@ class _DragBar(QFrame):
         self.setProperty("kind", kind)
         self.setProperty("danger", "true" if danger else "false")
         self.setProperty("compact", "true" if self._compact else "false")
+        self.setProperty("hasTabs", "true" if content_widget is not None else "false")
 
         row = QHBoxLayout(self)
-        if self._compact:
+        if content_widget is not None and self._compact:
+            row.setContentsMargins(6, 2, 4, 2)
+            row.setSpacing(2)
+            btn_w, btn_h = 26, 22
+            self.setFixedHeight(34)
+        elif self._compact:
             row.setContentsMargins(10, 2, 4, 2)
             row.setSpacing(2)
             btn_w, btn_h = 26, 22
@@ -259,7 +302,16 @@ class _DragBar(QFrame):
             btn_w, btn_h = 32, 28
         self.lbl_title = QLabel(title)
         self.lbl_title.setObjectName("dialogCaption")
-        row.addWidget(self.lbl_title, 1)
+        if content_widget is not None:
+            self.lbl_title.hide()
+            row.addWidget(content_widget, 0)
+            # Empty stretch fills the remaining title-bar area for window dragging.
+            drag_fill = QWidget(self)
+            drag_fill.setObjectName("dialogTitleDragFill")
+            drag_fill.setMinimumWidth(24)
+            row.addWidget(drag_fill, 1)
+        else:
+            row.addWidget(self.lbl_title, 1)
 
         self.btn_fullscreen: WindowChromeButton | None = None
         self.btn_min: WindowChromeButton | None = None
@@ -284,7 +336,11 @@ class _DragBar(QFrame):
                 self.btn_max.clicked.connect(self._toggle_max)
                 row.addWidget(self.btn_max, 0)
 
-        btn_close = WindowChromeButton(ICON_CLOSE, self, width=btn_w, height=btn_h)
+        # Slightly wider close hit-target; painted as solid red on hover.
+        close_w = max(btn_w, 32 if self._compact else 36)
+        btn_close = WindowChromeButton(
+            ICON_CLOSE, self, object_name="windowCloseBtn", width=close_w, height=btn_h
+        )
         btn_close.setToolTip(i18n.t("close_action"))
         # QDialog → reject(); QMainWindow / other top-levels → close().
         if isinstance(host, QDialog):
