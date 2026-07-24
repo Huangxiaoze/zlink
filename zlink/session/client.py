@@ -56,15 +56,16 @@ from ..ui.qt_bind import (
     PointingHandCursor,
     WA_StyledBackground,
     QApplication,
+    QAction,
     QColor,
     QFileDialog,
     QCursor,
-    QFrame,
-    QHBoxLayout,
     QImage,
     QKeyEvent,
     QKeySequence,
+    QHBoxLayout,
     QMainWindow,
+    QMenu,
     QMouseEvent,
     QObject,
     QPainter,
@@ -96,6 +97,7 @@ from ..ui.qt_bind import (
     WindowShortcut,
     black,
     event_pos,
+    menu_exec,
     qt_enum_eq,
     qt_enum_int,
     qt_has_flag,
@@ -276,13 +278,17 @@ class RemoteCanvas(QWidget):
         return (px - x) / w, (py - y) / h
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        if self.host_window is not None:
-            _px, py = event_pos(event)
-            self.host_window._on_canvas_mouse_y(py)
+        if self._overlay_blocks_mouse(event):
+            super().mouseMoveEvent(event)
+            return
         self._emit_mouse("move", event)
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._overlay_blocks_mouse(event):
+            event.accept()
+            super().mousePressEvent(event)
+            return
         self._emit_mouse("down", event, button=_qt_button(event.button()))
         self.setFocus(MouseFocusReason)
         win = self.host_window
@@ -294,11 +300,20 @@ class RemoteCanvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._overlay_blocks_mouse(event):
+            event.accept()
+            super().mouseReleaseEvent(event)
+            return
         self._emit_mouse("up", event, button=_qt_button(event.button()))
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         px, py = event_pos(event)
+        pt = QPoint(int(px), int(py))
+        for child in self.children():
+            if isinstance(child, QWidget) and child.isVisible() and child.geometry().contains(pt):
+                super().wheelEvent(event)
+                return
         norm = self._norm(px, py)
         if norm and self.on_mouse:
             host = self.host_window
@@ -371,7 +386,19 @@ class RemoteCanvas(QWidget):
             self.on_key("up", _qt_key_name(event))
         event.accept()
 
+    def _overlay_blocks_mouse(self, event: QMouseEvent) -> bool:
+        px, py = event_pos(event)
+        pt = QPoint(int(px), int(py))
+        for child in self.children():
+            if not isinstance(child, QWidget):
+                continue
+            if child.isVisible() and child.geometry().contains(pt):
+                return True
+        return False
+
     def _emit_mouse(self, action: str, event: QMouseEvent, **extra: Any) -> None:
+        if self._overlay_blocks_mouse(event):
+            return
         if not self.on_mouse:
             return
         host = self.host_window
@@ -384,82 +411,174 @@ class RemoteCanvas(QWidget):
         self.on_mouse(action, norm[0], norm[1], extra)
 
 
-class ViewerExitFullscreenButton(QPushButton):
-    """Top-center translucent icon control shown only while fullscreen."""
+def _paint_tools_glyph(p: QPainter, ink: QColor, cx: float, cy: float) -> None:
+    p.setPen(NoPen)
+    p.setBrush(ink)
+    dot = 2.2
+    for offset in (-5.0, 0.0, 5.0):
+        p.drawEllipse(int(cx - dot), int(cy + offset - dot), int(dot * 2), int(dot * 2))
+
+
+def _paint_exit_fs_glyph(p: QPainter, ink: QColor, cx: float, cy: float) -> None:
+    p.setPen(NoPen)
+    p.setBrush(ink)
+    box = 11.0
+    arm = 4.5
+    thick = 2.0
+    left = cx - box * 0.5
+    right = cx + box * 0.5
+    top = cy - box * 0.5
+    bottom = cy + box * 0.5
+
+    def bar(x: float, y: float, w: float, h: float) -> None:
+        p.drawRoundedRect(x, y, w, h, 0.8, 0.8)
+
+    bar(left, top, arm, thick)
+    bar(left, top, thick, arm)
+    bar(right - arm, top, arm, thick)
+    bar(right - thick, top, thick, arm)
+    bar(left, bottom - thick, arm, thick)
+    bar(left, bottom - arm, thick, arm)
+    bar(right - arm, bottom - thick, arm, thick)
+    bar(right - thick, bottom - arm, thick, arm)
+
+
+class ViewerOverlayButton(QPushButton):
+    """Small translucent floating control (matches exit-fullscreen styling)."""
 
     _W = 44
     _H = 30
 
-    def __init__(
-        self,
-        parent: QWidget,
-        on_exit: Callable[[], None],
-        on_hover: Callable[[bool], None],
-    ) -> None:
+    def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
-        self._on_hover = on_hover
-        self.setObjectName("viewerExitFsBtn")
         self.setCursor(PointingHandCursor)
         self.setFocusPolicy(NoFocus)
         self.setFixedSize(self._W, self._H)
         self.setText("")
-        self.setToolTip(i18n.t("viewer_exit_fullscreen"))
-        self.clicked.connect(on_exit)
-        self.hide()
+
+    def _paint_chrome(self, painter: QPainter, draw_glyph: Callable[[QPainter, QColor], None]) -> None:
+        painter.setRenderHint(Antialiasing, True)
+        hovered = bool(self.underMouse())
+        bg = QColor(0, 0, 0, 165 if hovered else 105)
+        border = QColor(255, 255, 255, 100 if hovered else 60)
+        painter.setBrush(bg)
+        painter.setPen(border)
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 15, 15)
+        ink = QColor(255, 255, 255, 235 if hovered else 210)
+        draw_glyph(painter, ink)
 
     def enterEvent(self, event) -> None:  # noqa: N802
-        self._on_hover(True)
         self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
-        self._on_hover(False)
         self.update()
         super().leaveEvent(event)
+
+
+class ViewerFullscreenChromeBar(QWidget):
+    """Fullscreen top bar: tools menu | divider | exit fullscreen."""
+
+    _H = 30
+    _SEG_W = 44
+    _W = _SEG_W * 2 + 1
+
+    def __init__(self, parent: QWidget, menu: QMenu, on_exit: Callable[[], None]) -> None:
+        super().__init__(parent)
+        self.setObjectName("viewerFullscreenChrome")
+        self._menu = menu
+        self._on_exit = on_exit
+        self._hover = ""
+        self.setFixedSize(self._W, self._H)
+        self.setCursor(PointingHandCursor)
+        self.setFocusPolicy(NoFocus)
+        self.setAttribute(WA_StyledBackground, False)
+        self.hide()
+
+    def _notify_local_use(self) -> None:
+        host = self.parentWidget()
+        while host is not None and not isinstance(host, RemoteClientPage):
+            host = host.parentWidget()
+        if isinstance(host, RemoteClientPage):
+            host.flush_remote_input()
+
+    def _segment_at(self, x: int) -> str:
+        if x < self._SEG_W:
+            return "tools"
+        if x > self._SEG_W:
+            return "exit"
+        return ""
+
+    def _set_hover(self, segment: str) -> None:
+        segment = segment or ""
+        if segment == self._hover:
+            return
+        self._hover = segment
+        if segment == "tools":
+            self.setToolTip(i18n.t("viewer_tools"))
+        elif segment == "exit":
+            self.setToolTip(i18n.t("viewer_exit_fullscreen"))
+        else:
+            self.setToolTip("")
+        self.update()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._set_hover("")
+        super().leaveEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        self._set_hover(self._segment_at(int(event_pos(event)[0])))
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        seg = self._segment_at(int(event_pos(event)[0]))
+        event.accept()
+        if seg == "tools":
+            self._notify_local_use()
+            menu_exec(self._menu, self.mapToGlobal(QPoint(0, self.height() + 4)))
+        elif seg == "exit":
+            self._notify_local_use()
+            self._on_exit()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        event.accept()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         with widget_painter(self) as painter:
             painter.setRenderHint(Antialiasing, True)
-            hovered = bool(self.underMouse())
+            hovered = bool(self._hover)
             bg = QColor(0, 0, 0, 165 if hovered else 105)
             border = QColor(255, 255, 255, 100 if hovered else 60)
             painter.setBrush(bg)
             painter.setPen(border)
             painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 15, 15)
 
-            # Compact "exit fullscreen" glyph: four corner brackets pointing inward.
+            divider_x = self._SEG_W + 0.5
+            div = QColor(255, 255, 255, 90 if hovered else 55)
+            painter.setPen(QPen(div, 1))
+            painter.drawLine(int(divider_x), 7, int(divider_x), self.height() - 7)
+
             ink = QColor(255, 255, 255, 235 if hovered else 210)
-            cx = self.width() * 0.5
+            tools_cx = self._SEG_W * 0.5
+            exit_cx = self._SEG_W + 1 + self._SEG_W * 0.5
             cy = self.height() * 0.5
-            box = 11.0
-            arm = 4.5
-            thick = 2.0
-            left = cx - box * 0.5
-            right = cx + box * 0.5
-            top = cy - box * 0.5
-            bottom = cy + box * 0.5
-            painter.setPen(NoPen)
-            painter.setBrush(ink)
-
-            def bar(x: float, y: float, w: float, h: float) -> None:
-                painter.drawRoundedRect(x, y, w, h, 0.8, 0.8)
-
-            # top-left
-            bar(left, top, arm, thick)
-            bar(left, top, thick, arm)
-            # top-right
-            bar(right - arm, top, arm, thick)
-            bar(right - thick, top, thick, arm)
-            # bottom-left
-            bar(left, bottom - thick, arm, thick)
-            bar(left, bottom - arm, thick, arm)
-            # bottom-right
-            bar(right - arm, bottom - thick, arm, thick)
-            bar(right - thick, bottom - arm, thick, arm)
+            if self._hover == "tools":
+                hi = QColor(255, 255, 255, 255)
+                _paint_tools_glyph(painter, hi, tools_cx, cy)
+                _paint_exit_fs_glyph(painter, ink, exit_cx, cy)
+            elif self._hover == "exit":
+                _paint_tools_glyph(painter, ink, tools_cx, cy)
+                _paint_exit_fs_glyph(painter, QColor(255, 255, 255, 255), exit_cx, cy)
+            else:
+                _paint_tools_glyph(painter, ink, tools_cx, cy)
+                _paint_exit_fs_glyph(painter, ink, exit_cx, cy)
 
 
-class ViewerChromeBar(QFrame):
-    """Top-edge pull-down control: send/browse files + terminal."""
+class ViewerToolsButton(ViewerOverlayButton):
+    """Always-visible tools menu: send file, browse files, terminal."""
 
     def __init__(
         self,
@@ -467,47 +586,60 @@ class ViewerChromeBar(QFrame):
         on_send_file: Callable[[], None],
         on_browse_files: Callable[[], None],
         on_terminal: Callable[[], None],
-        on_hover: Callable[[bool], None],
     ) -> None:
         super().__init__(parent)
-        self._on_hover = on_hover
-        self.setObjectName("viewerChromeBar")
-        # Colors come from the app stylesheet (themes.py) so settings theme changes apply.
-        self.setAttribute(WA_StyledBackground, True)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 6, 12, 6)
-        lay.setSpacing(8)
-
-        self.btn_send = QPushButton(i18n.t("viewer_send_file"))
-        self.btn_send.setObjectName("viewerChromeBtn")
-        self.btn_send.setCursor(PointingHandCursor)
-        self.btn_send.setFocusPolicy(NoFocus)
-        self.btn_send.clicked.connect(on_send_file)
-        lay.addWidget(self.btn_send)
-
-        self.btn_browse = QPushButton(i18n.t("viewer_browse_files"))
-        self.btn_browse.setObjectName("viewerChromeBtn")
-        self.btn_browse.setCursor(PointingHandCursor)
-        self.btn_browse.setFocusPolicy(NoFocus)
-        self.btn_browse.clicked.connect(on_browse_files)
-        lay.addWidget(self.btn_browse)
-
-        self.btn_term = QPushButton(i18n.t("viewer_terminal"))
-        self.btn_term.setObjectName("viewerChromeBtn")
-        self.btn_term.setCursor(PointingHandCursor)
-        self.btn_term.setFocusPolicy(NoFocus)
-        self.btn_term.clicked.connect(on_terminal)
-        lay.addWidget(self.btn_term)
-        lay.addStretch(1)
+        self.setObjectName("viewerToolsBtn")
+        self._menu = QMenu(self)
+        self._act_send = QAction(i18n.t("viewer_send_file"), self)
+        self._act_browse = QAction(i18n.t("viewer_browse_files"), self)
+        self._act_term = QAction(i18n.t("viewer_terminal"), self)
+        self._act_send.triggered.connect(on_send_file)
+        self._act_browse.triggered.connect(on_browse_files)
+        self._act_term.triggered.connect(on_terminal)
+        self._menu.addAction(self._act_send)
+        self._menu.addAction(self._act_browse)
+        self._menu.addAction(self._act_term)
+        self.clicked.connect(self._on_clicked)
+        self.retranslate()
         self.hide()
 
-    def enterEvent(self, event) -> None:  # noqa: N802
-        self._on_hover(True)
-        super().enterEvent(event)
+    def _on_clicked(self) -> None:
+        host = self.parentWidget()
+        while host is not None and not isinstance(host, RemoteClientPage):
+            host = host.parentWidget()
+        if isinstance(host, RemoteClientPage):
+            host.flush_remote_input()
+        self._popup_menu()
 
-    def leaveEvent(self, event) -> None:  # noqa: N802
-        self._on_hover(False)
-        super().leaveEvent(event)
+    def retranslate(self) -> None:
+        self.setToolTip(i18n.t("viewer_tools"))
+        self._act_send.setText(i18n.t("viewer_send_file"))
+        self._act_browse.setText(i18n.t("viewer_browse_files"))
+        self._act_term.setText(i18n.t("viewer_terminal"))
+
+    def update_actions(self, *, can_files: bool, can_terminal: bool) -> None:
+        self._act_send.setEnabled(can_files)
+        self._act_browse.setEnabled(can_files)
+        self._act_term.setEnabled(can_terminal)
+
+    def _popup_menu(self) -> None:
+        menu_exec(self._menu, self.mapToGlobal(QPoint(0, self.height() + 4)))
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        event.accept()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        event.accept()
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        with widget_painter(self) as painter:
+
+            def glyph(p: QPainter, ink: QColor) -> None:
+                _paint_tools_glyph(p, ink, self.width() * 0.5, self.height() * 0.5)
+
+            self._paint_chrome(painter, glyph)
 
 
 class RemoteClientPage(QWidget):
@@ -539,8 +671,6 @@ class RemoteClientPage(QWidget):
         self._base_title = config.window_title
         self._tab_label = self._short_tab_label(config.window_title)
         self._swallow_esc_up = False
-        self._chrome_edge_px = 10
-        self._chrome_hover = False
         self._features: Set[str] = set()
         self._file_assembler: Optional[FileAssembler] = None
         self._file_sending = False
@@ -563,21 +693,17 @@ class RemoteClientPage(QWidget):
         self.canvas.on_local_key = self._handle_local_key
         layout.addWidget(self.canvas, 1)
 
-        self.chrome_bar = ViewerChromeBar(
+        self._tools_btn = ViewerToolsButton(
             self.canvas,
             on_send_file=self._pick_and_send_file,
             on_browse_files=self._open_remote_files,
             on_terminal=self._open_terminal,
-            on_hover=self._on_chrome_hover,
         )
-        self._exit_fs_btn = ViewerExitFullscreenButton(
+        self._fs_chrome = ViewerFullscreenChromeBar(
             self.canvas,
+            menu=self._tools_btn._menu,
             on_exit=lambda: self._set_fullscreen(False),
-            on_hover=self._on_chrome_hover,
         )
-        self._chrome_hide_timer = QTimer(self)
-        self._chrome_hide_timer.setSingleShot(True)
-        self._chrome_hide_timer.timeout.connect(self._hide_chrome_bar)
 
         self._bus.frame_jpeg.connect(self._on_frame_jpeg)
         self._bus.status.connect(self._on_status)
@@ -605,6 +731,16 @@ class RemoteClientPage(QWidget):
         self._sc_pull = QShortcut(QKeySequence("Ctrl+Alt+V"), self)
         self._sc_pull.setContext(WindowShortcut)
         self._sc_pull.activated.connect(self._hotkey_pull_clipboard)
+
+        self.session_ack.connect(self._on_session_ack)
+        QTimer.singleShot(0, self._update_viewer_overlays)
+
+    def _on_session_ack(self, _ack: object) -> None:
+        QTimer.singleShot(0, self._update_viewer_overlays)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        QTimer.singleShot(0, self._update_viewer_overlays)
 
     @staticmethod
     def _short_tab_label(title: str) -> str:
@@ -670,14 +806,8 @@ class RemoteClientPage(QWidget):
         shell.set_fullscreen(bool(enabled))
 
     def on_shell_fullscreen_changed(self, enabled: bool) -> None:
-        """Update overlay chrome only; keyboard grab is handled by ViewerShell."""
-        self._chrome_hide_timer.stop()
-        self._chrome_hover = False
-        self.chrome_bar.hide()
-        self._exit_fs_btn.hide()
-        if enabled and self.isVisible():
-            self._show_chrome_bar()
-            self._chrome_hide_timer.start(1600)
+        """Update overlay controls; keyboard grab is handled by ViewerShell."""
+        self._update_viewer_overlays()
 
     def _ensure_canvas_keyboard(self, grab: bool) -> None:
         """Own keyboard input while this page is the active fullscreen target."""
@@ -717,68 +847,41 @@ class RemoteClientPage(QWidget):
         except (ConnectionError, OSError):
             self._stop.set()
 
-    def _on_canvas_mouse_y(self, y: float) -> None:
-        # Same reveal gesture in windowed and fullscreen modes.
-        if y <= self._chrome_edge_px:
-            self._show_chrome_bar()
-            return
-        if self._chrome_hover:
-            return
-        if self.isFullScreen():
-            edge = self._exit_fs_btn.height() + 16
-        else:
-            edge = self.chrome_bar.height() + 8
-        if y > edge:
-            self._chrome_hide_timer.start(280)
+    def _place_tools_btn(self) -> None:
+        self._tools_btn.setGeometry(8, 8, int(self._tools_btn._W), int(self._tools_btn._H))
+        self._tools_btn.raise_()
 
-    def _on_chrome_hover(self, hovering: bool) -> None:
-        self._chrome_hover = hovering
-        if hovering:
-            self._chrome_hide_timer.stop()
-            self._show_chrome_bar()
-        else:
-            self._chrome_hide_timer.start(350)
-
-    def _place_exit_fs_btn(self) -> None:
-        self._exit_fs_btn.setToolTip(i18n.t("viewer_exit_fullscreen"))
-        bw = int(self._exit_fs_btn._W)
-        bh = int(self._exit_fs_btn._H)
+    def _place_fs_chrome(self) -> None:
+        w = int(ViewerFullscreenChromeBar._W)
+        h = int(ViewerFullscreenChromeBar._H)
         cw = max(1, self.canvas.width())
-        self._exit_fs_btn.setGeometry(max(0, (cw - bw) // 2), 8, bw, bh)
-        self._exit_fs_btn.raise_()
+        self._fs_chrome.setGeometry(max(0, (cw - w) // 2), 8, w, h)
+        self._fs_chrome.raise_()
 
-    def _show_chrome_bar(self) -> None:
-        self._chrome_hide_timer.stop()
-        # Fullscreen: only the exit icon. Windowed: file/terminal chrome bar.
-        if self.isFullScreen():
-            self.chrome_bar.hide()
-            self._place_exit_fs_btn()
-            self._exit_fs_btn.show()
+    def _update_viewer_overlays(self) -> None:
+        if not self.isVisible():
             return
-
-        self._exit_fs_btn.hide()
-        self.chrome_bar.btn_send.setText(i18n.t("viewer_send_file"))
-        self.chrome_bar.btn_browse.setText(i18n.t("viewer_browse_files"))
-        self.chrome_bar.btn_term.setText(i18n.t("viewer_terminal"))
-        can_files = FEATURE_FILE_TRANSFER in self._features and not self._file_sending
-        self.chrome_bar.btn_send.setEnabled(can_files)
-        self.chrome_bar.btn_browse.setEnabled(can_files)
-        self.chrome_bar.btn_term.setEnabled(FEATURE_TERMINAL in self._features)
-        w = max(1, self.canvas.width())
-        self.chrome_bar.setGeometry(0, 0, w, 40)
-        self.chrome_bar.raise_()
-        self.chrome_bar.show()
-
-    def _hide_chrome_bar(self) -> None:
-        self._chrome_hide_timer.stop()
-        self._chrome_hover = False
-        self.chrome_bar.hide()
-        self._exit_fs_btn.hide()
+        can_files = (
+            FEATURE_FILE_TRANSFER in self._features
+            and not self._file_sending
+            and self.has_live_session()
+        )
+        can_terminal = FEATURE_TERMINAL in self._features and self.has_live_session()
+        self._tools_btn.retranslate()
+        self._tools_btn.update_actions(can_files=can_files, can_terminal=can_terminal)
+        if self.isFullScreen():
+            self._tools_btn.hide()
+            self._place_fs_chrome()
+            self._fs_chrome.show()
+        else:
+            self._fs_chrome.hide()
+            self._place_tools_btn()
+            self._tools_btn.show()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        if self.chrome_bar.isVisible() or self._exit_fs_btn.isVisible():
-            self._show_chrome_bar()
+        if self._tools_btn.isVisible() or self._fs_chrome.isVisible():
+            self._update_viewer_overlays()
 
     def start(self) -> None:
         self._stop.clear()
@@ -1178,7 +1281,7 @@ class RemoteClientPage(QWidget):
 
         self._file_sending = True
         self._file_send_stop.clear()
-        self.chrome_bar.btn_send.setEnabled(False)
+        self._update_viewer_overlays()
         self._bus.file_progress.emit(i18n.t("file_sending", name=src.name, pct=0))
 
         def worker() -> None:
@@ -1222,9 +1325,7 @@ class RemoteClientPage(QWidget):
         self.send_local_file(path)
 
     def _refresh_send_button(self) -> None:
-        can = FEATURE_FILE_TRANSFER in self._features and not self._file_sending
-        self.chrome_bar.btn_send.setEnabled(can and self.has_live_session())
-        self.chrome_bar.btn_browse.setEnabled(can and self.has_live_session())
+        self._update_viewer_overlays()
 
     def _heartbeat_loop(self, conn: Connection, session_stop: threading.Event) -> None:
         interval = self.config.net.heartbeat_interval_s
