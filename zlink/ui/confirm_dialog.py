@@ -41,7 +41,7 @@ from .qt_bind import (
     qt_has_flag,
     widget_painter,
 )
-from .themes import CURRENT
+from .themes import CURRENT, button_pressed
 from .toggle_switch import ToggleSwitch
 
 
@@ -263,7 +263,7 @@ class HeaderSettingsButton(QPushButton):
             hovered = self.underMouse()
             pressed = self.isDown()
             if pressed:
-                fill = QColor(CURRENT.btn_pressed)
+                fill = QColor(button_pressed(CURRENT))
                 border = QColor(CURRENT.line)
                 ink = QColor(CURRENT.accent_2 if hasattr(CURRENT, "accent_2") else CURRENT.accent)
             elif hovered:

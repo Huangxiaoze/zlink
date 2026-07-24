@@ -111,6 +111,11 @@ class ThemeColors:
     splitter: str
 
 
+def button_pressed(c: ThemeColors) -> str:
+    """Pressed-state background for standard buttons (matches QSS)."""
+    return _shade(c.btn_hover, 0.90)
+
+
 LIGHT = ThemeColors(
     id="light",
     bg="#EEF2F4",

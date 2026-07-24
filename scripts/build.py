@@ -120,6 +120,7 @@ def _hidden_imports() -> list[str]:
         "zlink.ui.tray_icon",
         "zlink.features",
         "zlink.features.devices",
+        "zlink.features.autostart",
         "zlink.features.clipboard_sync",
         "zlink.features.file_transfer",
         "zlink.features.remote_files",

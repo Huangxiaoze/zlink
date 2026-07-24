@@ -64,6 +64,7 @@ from .qt_bind import (
 from ..core.config import DEFAULT_PORT, ClientConfig, HostConfig, NetConfig, StreamConfig
 from ..core.protocol import unpack_file_message
 from ..features.clipboard_sync import ClipboardBridge
+from ..features.autostart import apply as apply_autostart, supports_autostart
 from ..features.devices import Device, DeviceStore, list_local_ipv4, make_verify_code, probe_device
 from ..features.file_transfer import (
     FileAssembler,
@@ -501,6 +502,26 @@ class SettingsDialog(QDialog):
         form.addRow(i18n.t("scale"), self.scale)
         form.addRow(i18n.t("probe_interval"), self.probe)
 
+        self.chk_launch_at_login = ToggleSwitch()
+        self.chk_launch_at_login.setChecked(bool(store.settings.launch_at_login))
+        self.chk_start_minimized = ToggleSwitch()
+        self.chk_start_minimized.setChecked(bool(store.settings.start_minimized))
+        if supports_autostart():
+            form.addRow(i18n.t("launch_at_login"), self._settings_toggle_row(self.chk_launch_at_login))
+            form.addRow(i18n.t("start_minimized"), self._settings_toggle_row(self.chk_start_minimized))
+            autostart_hint = QLabel(i18n.t("launch_at_login_hint"))
+        else:
+            self.chk_launch_at_login.setEnabled(False)
+            self.chk_start_minimized.setEnabled(False)
+            autostart_hint = QLabel(i18n.t("autostart_unsupported"))
+        autostart_hint.setObjectName("pageMuted")
+        autostart_hint.setWordWrap(True)
+        form.addRow(autostart_hint)
+        minimized_hint = QLabel(i18n.t("start_minimized_hint"))
+        minimized_hint.setObjectName("pageMuted")
+        minimized_hint.setWordWrap(True)
+        form.addRow(minimized_hint)
+
         self.btn_hd = QPushButton(i18n.t("hd_preset"))
         self.btn_hd.setObjectName("primary")
         self.btn_hd.clicked.connect(self._apply_hd)
@@ -520,6 +541,15 @@ class SettingsDialog(QDialog):
         form.addRow(buttons)
         root.addWidget(form_host)
 
+    @staticmethod
+    def _settings_toggle_row(toggle: ToggleSwitch) -> QWidget:
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addStretch(1)
+        lay.addWidget(toggle, 0, make_alignment(AlignRight, AlignVCenter))
+        return row
+
     def _apply_hd(self) -> None:
         self.fps.setText("30")
         self.quality.setText("95")
@@ -534,9 +564,23 @@ class SettingsDialog(QDialog):
             self.store.settings.language = str(self.lang.currentData())
             self.store.settings.theme = str(self.theme.currentData() or DEFAULT_THEME)
             self.store.settings.settings_version = 3
+            launch_at_login = self.chk_launch_at_login.isChecked()
+            start_minimized = self.chk_start_minimized.isChecked()
         except ValueError:
             show_warning(self, title=i18n.t("tip"), message=i18n.t("invalid_number"))
             return
+        if supports_autostart():
+            try:
+                apply_autostart(launch_at_login, start_minimized=start_minimized)
+            except OSError as exc:
+                show_warning(
+                    self,
+                    title=i18n.t("tip"),
+                    message=i18n.t("autostart_failed", error=str(exc)),
+                )
+                return
+        self.store.settings.launch_at_login = launch_at_login
+        self.store.settings.start_minimized = start_minimized
         self.store.save()
         self.accept()
 
@@ -586,6 +630,19 @@ class MainWindow(QMainWindow):
         # Start hosting after the first UI paint; user can still stop/start manually.
         QTimer.singleShot(0, self._auto_start_host)
         QTimer.singleShot(0, self._setup_tray)
+
+    def apply_startup_visibility(self, *, minimized: bool) -> None:
+        """Hide to tray after startup when --minimized or setting enabled."""
+        if not minimized:
+            return
+
+        def _finish() -> None:
+            if self._tray is not None and self._tray.is_visible():
+                self.hide()
+            else:
+                self.showNormal()
+
+        QTimer.singleShot(150, _finish)
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -1904,7 +1961,7 @@ class MainWindow(QMainWindow):
             app.quit()
 
 
-def run_app() -> None:
+def run_app(*, minimized: bool = False) -> None:
     ensure_utf8_stdio()
     ensure_windows_app_id()
     app = QApplication.instance() or QApplication([])
@@ -1913,9 +1970,18 @@ def run_app() -> None:
     app.setAttribute(AA_DontShowIconsInMenus, False)
     apply_app_icon(app)
     bootstrap = DeviceStore()
+    from ..features.autostart import sync_settings
+
+    sync_settings(
+        launch_at_login=bootstrap.settings.launch_at_login,
+        start_minimized=bootstrap.settings.start_minimized,
+    )
     i18n.set_lang(bootstrap.settings.language)
     apply_theme(app, bootstrap.settings.theme)
     win = MainWindow()
+    start_hidden = bool(minimized or bootstrap.settings.start_minimized)
+    if start_hidden:
+        win.apply_startup_visibility(minimized=True)
     win.show()
     apply_window_chrome(win, THEME)
     QTimer.singleShot(200, win._probe_now)

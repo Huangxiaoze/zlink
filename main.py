@@ -12,6 +12,11 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Cross-platform remote desktop (Python). Host is controlled; client controls.",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    parser.add_argument(
+        "--minimized",
+        action="store_true",
+        help="start GUI hidden to the system tray (also used by login autostart)",
+    )
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("gui", help="launch device-manager GUI (default)")
@@ -50,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     if command == "gui":
         from zlink.ui.app_gui import run_app
 
-        run_app()
+        run_app(minimized=bool(args.minimized))
         return 0
 
     from zlink.session.client import RemoteClient

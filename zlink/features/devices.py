@@ -152,6 +152,8 @@ class AppSettings:
     auto_probe_s: float = 8.0
     language: str = "zh_CN"
     theme: str = "light"
+    launch_at_login: bool = True
+    start_minimized: bool = True
     # Bump when default stream quality changes so old installs get upgraded once.
     settings_version: int = 3
 
@@ -210,6 +212,8 @@ class DeviceStore:
             auto_probe_s=float(settings.get("auto_probe_s", 8.0)),
             language=lang,
             theme=theme,
+            launch_at_login=bool(settings.get("launch_at_login", True)),
+            start_minimized=bool(settings.get("start_minimized", True)),
             settings_version=max(version, 3),
         )
         if not self.settings.host_password:
