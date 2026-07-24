@@ -1072,6 +1072,19 @@ QMainWindow, QWidget#root {{
     background: {c.bg};
     color: {c.text};
 }}
+QMainWindow#mainWindow {{
+    background: {c.bg};
+}}
+QWidget#root {{
+    background: {c.bg};
+    border: 1px solid {c.line};
+    border-radius: 16px;
+}}
+QWidget#mainPanel {{
+    background: {c.bg};
+    border-top-right-radius: 15px;
+    border-bottom-right-radius: 15px;
+}}
 QDialog {{
     background: {c.card};
     color: {c.text};
@@ -1260,6 +1273,8 @@ QLabel#hostDanger {{
 }}
 QFrame#side {{
     background: {c.side};
+    border-top-left-radius: 15px;
+    border-bottom-left-radius: 15px;
 }}
 QScrollArea#sideScroll, QScrollArea#sideScroll > QWidget > QWidget {{
     background: {c.side};
@@ -1521,18 +1536,18 @@ QDialog#confirmDialog, QMainWindow#confirmDialog {{
     background: {c.card};
     color: {c.text};
     border: 1px solid {c.line};
-    border-radius: 14px;
+    border-radius: 10px;
 }}
 QFrame#dialogTitleBar {{
     background: {c.card};
     border: none;
     border-bottom: 1px solid {c.line};
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
-}}
-QFrame#dialogTitleBar[compact="true"] {{
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
+}}
+QFrame#dialogTitleBar[compact="true"] {{
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
 }}
 QLabel#dialogCaption {{
     color: {c.text};

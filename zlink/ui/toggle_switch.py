@@ -18,12 +18,15 @@ from .themes import CURRENT
 class ToggleSwitch(QAbstractButton):
     """Compact accent pill switch."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, compact: bool = False) -> None:
         super().__init__(parent)
         self.setCheckable(True)
         self.setCursor(PointingHandCursor)
         self.setFocusPolicy(NoFocus)
-        self.setFixedSize(46, 26)
+        if compact:
+            self.setFixedSize(34, 18)
+        else:
+            self.setFixedSize(46, 26)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         with widget_painter(self) as painter:
@@ -37,11 +40,12 @@ class ToggleSwitch(QAbstractButton):
                 track = QColor(CURRENT.line)
                 thumb = QColor("#C8D0D6")
 
+            margin = 2 if self.height() <= 20 else 3
+            radius = self.height() / 2.0
             painter.setPen(NoPen)
             painter.setBrush(track)
-            painter.drawRoundedRect(0, 0, self.width(), self.height(), 13, 13)
+            painter.drawRoundedRect(0, 0, self.width(), self.height(), radius, radius)
 
-            margin = 3
             diameter = self.height() - margin * 2
             x = self.width() - margin - diameter if checked else margin
             painter.setBrush(thumb)

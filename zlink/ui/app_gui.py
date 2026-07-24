@@ -95,7 +95,7 @@ from .i18n import i18n
 from .qt_fonts import apply_app_font, ensure_utf8_stdio
 from ..features.terminal_view import DirectTerminalWindow
 from .tray_icon import AppTray
-from .window_chrome import apply_window_chrome, ensure_windows_app_id
+from .window_chrome import apply_window_chrome, bind_frameless_shell, ensure_windows_app_id
 from .themes import (
     DEFAULT_THEME,
     ThemeColors,
@@ -656,24 +656,21 @@ class MainWindow(QMainWindow):
                 self._apply_window_geometry()
 
     def _apply_window_geometry(self) -> None:
-        """Size the main window for the current screen; keep it resizable on small displays."""
+        """Fixed main-window size for the current screen."""
         avail_w, avail_h = _available_screen_size(self)
-        # Keep a thin margin so the frameless window never clips under taskbars.
         max_w = max(560, avail_w - 24)
         max_h = max(360, avail_h - 24)
-        # Soft floor — never larger than the screen itself.
-        self.setMinimumSize(min(640, max_w), min(420, max_h))
 
         target_w = min(1120, max_w)
-        target_h = min(700, max_h)
-        # On compact screens, use nearly the full available desktop.
+        target_h = min(620, max_h)
         if avail_w < 1100 or avail_h < 700:
             target_w = max_w
             target_h = max_h
-        self.resize(int(target_w), int(target_h))
+        self.setFixedSize(int(target_w), int(target_h))
 
     def _build(self) -> None:
         make_frameless_dialog(self, modal=False, as_window=True)
+        self.setObjectName("mainWindow")
         self._drag_filter = _WindowDragFilter(self)
         self._apply_window_geometry()
 
@@ -738,7 +735,7 @@ class MainWindow(QMainWindow):
         self.lbl_show_code = QLabel()
         self.lbl_show_code.setObjectName("sideMuted")
         self.lbl_show_code.setCursor(PointingHandCursor)
-        self.chk_show = ToggleSwitch()
+        self.chk_show = ToggleSwitch(compact=True)
         self.chk_show.toggled.connect(self._on_show_code_toggled)
         # Clicking the text also toggles the switch.
         self.lbl_show_code.mousePressEvent = (  # type: ignore[method-assign]
@@ -748,7 +745,7 @@ class MainWindow(QMainWindow):
         self.lbl_verify.setObjectName("passValue")
 
         verify_head = QHBoxLayout()
-        verify_head.setSpacing(8)
+        verify_head.setSpacing(6)
         verify_head.addWidget(self.lbl_verify_title, 1)
         verify_head.addWidget(self.lbl_show_code, 0)
         verify_head.addWidget(self.chk_show, 0)
@@ -813,6 +810,7 @@ class MainWindow(QMainWindow):
         side_l.addWidget(actions, 0)
 
         main = QWidget()
+        main.setObjectName("mainPanel")
         main_l = QVBoxLayout(main)
         main_l.setContentsMargins(22, 12, 12, 16)
         main_l.setSpacing(12)
@@ -989,6 +987,8 @@ class MainWindow(QMainWindow):
         if app is not None:
             app.installEventFilter(self._card_selection_filter)
             app.installEventFilter(self._drag_filter)
+
+        bind_frameless_shell(self, resizable=False, rounded=True, radius=16)
 
     def _setup_tray(self) -> None:
         """Windows tray / Ubuntu top-panel StatusNotifier icon."""

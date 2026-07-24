@@ -106,7 +106,7 @@ from ..ui.qt_bind import (
     widget_painter,
 )
 from ..ui.themes import CURRENT
-from ..ui.window_chrome import apply_window_chrome, ensure_windows_app_id
+from ..ui.window_chrome import apply_window_chrome, bind_frameless_shell, ensure_windows_app_id
 from .win_input_capture import AltTabCapture
 
 log = logging.getLogger(__name__)
@@ -1513,6 +1513,7 @@ class ViewerShell(QMainWindow):
         self.setObjectName("confirmDialog")
         make_frameless_dialog(self, modal=False, as_window=True)
         self.setWindowTitle(i18n.t("viewer_shell_title"))
+        self.setMinimumSize(480, 320)
         self.resize(1280, 720)
         apply_app_icon(self)
 
@@ -1569,6 +1570,7 @@ class ViewerShell(QMainWindow):
         self.stack.setObjectName("viewerStack")
         layout.addWidget(self.stack, 1)
         self.setCentralWidget(central)
+        bind_frameless_shell(self, resizable=True, rounded=True, radius=10)
 
         self._viewer_active = True
         self._alt_tab_sig.connect(self._on_captured_alt_tab)
@@ -1704,12 +1706,17 @@ class ViewerShell(QMainWindow):
         self.set_fullscreen(not self.isFullScreen())
 
     def set_fullscreen(self, enabled: bool) -> None:
+        helper = getattr(self, "_zlink_frameless_helper", None)
+        if helper is not None:
+            helper.set_resizable(not enabled)
         if enabled:
             self._drag.hide()
             self.showFullScreen()
         else:
             self.showNormal()
             self._drag.show()
+            if helper is not None:
+                QTimer.singleShot(0, helper.refresh)
         self._drag.sync_fullscreen_btn(bool(enabled))
         for page in self.pages():
             page.on_shell_fullscreen_changed(bool(enabled))
