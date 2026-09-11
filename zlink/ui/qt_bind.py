@@ -424,6 +424,14 @@ AltModifier = _enum(
     getattr(Qt, "AltModifier", None),
     getattr(getattr(Qt, "KeyboardModifier", None), "AltModifier", None),
 )
+ShiftModifier = _enum(
+    getattr(Qt, "ShiftModifier", None),
+    getattr(getattr(Qt, "KeyboardModifier", None), "ShiftModifier", None),
+)
+MetaModifier = _enum(
+    getattr(Qt, "MetaModifier", None),
+    getattr(getattr(Qt, "KeyboardModifier", None), "MetaModifier", None),
+)
 Key_C = _enum(
     getattr(Qt, "Key_C", None),
     getattr(getattr(Qt, "Key", None), "Key_C", None),
@@ -529,6 +537,18 @@ KEY_MAP_SRC = [
     # Key above Tab (US `~). Stable name so Alt/Meta combos can map to X11 Above_Tab.
     ("Key_QuoteLeft", "grave"),
     ("Key_Dead_Grave", "grave"),
+    ("Key_AsciiTilde", "grave"),
+    # US punctuation row — always physical names (Shift+. => period+shift, not ">").
+    ("Key_Period", "period"),
+    ("Key_Comma", "comma"),
+    ("Key_Minus", "minus"),
+    ("Key_Equal", "equal"),
+    ("Key_BracketLeft", "bracketleft"),
+    ("Key_BracketRight", "bracketright"),
+    ("Key_Backslash", "backslash"),
+    ("Key_Semicolon", "semicolon"),
+    ("Key_Apostrophe", "apostrophe"),
+    ("Key_Slash", "slash"),
     ("Key_F1", "f1"),
     ("Key_F2", "f2"),
     ("Key_F3", "f3"),

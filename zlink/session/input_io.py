@@ -17,6 +17,43 @@ log = logging.getLogger(__name__)
 # Physical key above Tab. GNOME binds switch-group to <Alt>/<Super>Above_Tab,
 # which is NOT the same keysym as plain grave/` — char injection misses it.
 _GRAVE_NAMES = frozenset({"`", "grave", "quoteleft", "above_tab", "abovetab"})
+# Qt physical punctuation names -> base US character (before Shift).
+_PUNCT_PHYS: dict[str, str] = {
+    "period": ".",
+    "comma": ",",
+    "minus": "-",
+    "equal": "=",
+    "bracketleft": "[",
+    "bracketright": "]",
+    "backslash": "\\",
+    "semicolon": ";",
+    "apostrophe": "'",
+    "slash": "/",
+}
+# Linux X11 keysyms for layout-aware Shift symbols sent as characters (e.g. "<", "~").
+_CHAR_X11: dict[str, str] = {
+    "<": "less",
+    ">": "greater",
+    ":": "colon",
+    "?": "question",
+    '"': "quotedbl",
+    "|": "bar",
+    "_": "underscore",
+    "+": "plus",
+    "!": "exclam",
+    "@": "at",
+    "#": "numbersign",
+    "$": "dollar",
+    "%": "percent",
+    "^": "asciicircum",
+    "&": "ampersand",
+    "*": "asterisk",
+    "(": "parenleft",
+    ")": "parenright",
+    "{": "braceleft",
+    "}": "braceright",
+    "~": "asciitilde",
+}
 _MODIFIER_KEYS = frozenset(
     {
         Key.alt,
@@ -144,16 +181,26 @@ class InputInjector:
         name_key = key_name.lower()
         try:
             if action == "down":
-                key = _resolve_key(key_name, self._pressed_keys)
-                self._keyboard.press(key)
-                self._pressed_keys.add(key)
-                self._injected_by_name[name_key] = key
+                x11_key = _x11_direct_char(key_name)
+                if x11_key is not None:
+                    # Symbol keysym already encodes Shift; drop HW Shift briefly.
+                    _release_shift_hw(self._keyboard)
+                    self._keyboard.press(x11_key)
+                    self._pressed_keys.add(x11_key)
+                    self._injected_by_name[name_key] = x11_key
+                else:
+                    key = _resolve_key(key_name, self._pressed_keys)
+                    self._keyboard.press(key)
+                    self._pressed_keys.add(key)
+                    self._injected_by_name[name_key] = key
             elif action == "up":
                 key = self._injected_by_name.pop(name_key, None)
                 if key is None:
                     key = _resolve_key(key_name, self._pressed_keys)
                 self._keyboard.release(key)
                 self._pressed_keys.discard(key)
+                if len(key_name) == 1 and key_name in _CHAR_X11:
+                    _restore_shift_hw_if_held(self._keyboard, self._pressed_keys)
             elif action == "type":
                 self._keyboard.type(key_name)
         except Exception:
@@ -209,6 +256,44 @@ def _modifier_held(pressed: Optional[set[Any]]) -> bool:
     return any(key in _MODIFIER_KEYS for key in pressed)
 
 
+def _shift_held(pressed: Optional[set[Any]]) -> bool:
+    if not pressed:
+        return False
+    shift_keys = {Key.shift, Key.shift_l, Key.shift_r}
+    return any(key in shift_keys for key in pressed)
+
+
+def _x11_direct_char(name: str):
+    if not sys.platform.startswith("linux") or len(name) != 1:
+        return None
+    sym = _CHAR_X11.get(name)
+    if not sym:
+        return None
+    return _x11_key_from_symbol(sym)
+
+
+_SHIFT_KEYS = (Key.shift, Key.shift_l, Key.shift_r)
+
+
+def _release_shift_hw(keyboard: KeyController) -> None:
+    for sk in _SHIFT_KEYS:
+        try:
+            keyboard.release(sk)
+        except Exception:
+            pass
+
+
+def _restore_shift_hw_if_held(keyboard: KeyController, pressed: set[Any]) -> None:
+    if not _shift_held(pressed):
+        return
+    for sk in _SHIFT_KEYS:
+        try:
+            keyboard.press(sk)
+            return
+        except Exception:
+            continue
+
+
 def _x11_key_from_symbol(symbol: str):
     """Resolve an X11 keysym via pynput's Linux backend (None on other platforms)."""
     if not sys.platform.startswith("linux"):
@@ -238,6 +323,9 @@ def _resolve_key(name: str, pressed: Optional[set[Any]] = None):
             if above is not None:
                 return above
         return "`"
+    phys = _PUNCT_PHYS.get(lowered)
+    if phys is not None:
+        return phys
     if len(name) == 1:
         return name
     # pygame-style names like "a", "K_a" etc.

@@ -32,6 +32,8 @@ from ..ui.confirm_dialog import (
 from ..ui.i18n import i18n
 from ..ui.qt_bind import (
     AltModifier,
+    MetaModifier,
+    ShiftModifier,
     ArrowCursor,
     BlankCursor,
     Antialiasing,
@@ -45,7 +47,6 @@ from ..ui.qt_bind import (
     Key_9,
     Key_A,
     Key_C,
-    Key_Escape,
     Key_F11,
     Key_V,
     Key_Z,
@@ -377,11 +378,6 @@ class RemoteCanvas(QWidget):
         if qt_key_in(event.key(), Key_F11):
             event.accept()
             return
-        win = self.host_window
-        if qt_key_in(event.key(), Key_Escape) and win is not None and win._swallow_esc_up:
-            win._swallow_esc_up = False
-            event.accept()
-            return
         if not event.isAutoRepeat() and self.on_key:
             self.on_key("up", _qt_key_name(event))
         event.accept()
@@ -670,7 +666,6 @@ class RemoteClientPage(QWidget):
         self._clip: Optional[ClipboardBridge] = None
         self._base_title = config.window_title
         self._tab_label = self._short_tab_label(config.window_title)
-        self._swallow_esc_up = False
         self._features: Set[str] = set()
         self._file_assembler: Optional[FileAssembler] = None
         self._file_sending = False
@@ -786,12 +781,9 @@ class RemoteClientPage(QWidget):
     def _handle_local_key(self, event: QKeyEvent) -> bool:
         if event.isAutoRepeat():
             return False
+        # Esc must reach the remote OS (dialogs, menus). Exit fullscreen via F11 / UI.
         if qt_key_in(event.key(), Key_F11):
             self._toggle_fullscreen()
-            return True
-        if qt_key_in(event.key(), Key_Escape) and self.isFullScreen():
-            self._swallow_esc_up = True
-            self._set_fullscreen(False)
             return True
         return False
 
@@ -1406,12 +1398,39 @@ def _qt_button(button: Any) -> str:
     return "left"
 
 
+def _qt_modifiers_held(event: QKeyEvent) -> bool:
+    mods = event.modifiers()
+    return (
+        qt_has_flag(mods, ControlModifier)
+        or qt_has_flag(mods, AltModifier)
+        or qt_has_flag(mods, ShiftModifier)
+        or qt_has_flag(mods, MetaModifier)
+    )
+
+
+def _only_shift_held(event: QKeyEvent) -> bool:
+    mods = event.modifiers()
+    return (
+        qt_has_flag(mods, ShiftModifier)
+        and not qt_has_flag(mods, ControlModifier)
+        and not qt_has_flag(mods, AltModifier)
+        and not qt_has_flag(mods, MetaModifier)
+    )
+
+
+def _shifted_symbol_char(event: QKeyEvent) -> Optional[str]:
+    """Layout-aware Shift+symbol (CN keyboard: Shift+. => '<', not US '>')."""
+    if not _only_shift_held(event):
+        return None
+    text = event.text()
+    if text and len(text) == 1 and text.isprintable() and not text.isalpha():
+        return text
+    return None
+
+
 def _qt_key_name(event: QKeyEvent) -> str:
     key = event.key()
-    if key in _KEY_CONSTANTS:
-        return _KEY_CONSTANTS[key]
-    # Under Ctrl/Alt, event.text() is often a control char (e.g. Ctrl+V -> \x16).
-    # Prefer physical letter/digit key codes so remote paste/copy actually works.
+    # Physical letters/digits always (Ctrl+C/V, Shift+A, etc.).
     try:
         key_i = qt_enum_int(key)
         a_i = qt_enum_int(Key_A)
@@ -1424,9 +1443,16 @@ def _qt_key_name(event: QKeyEvent) -> str:
         return chr(ord("a") + (key_i - a_i))
     if key_i is not None and zero_i is not None and nine_i is not None and zero_i <= key_i <= nine_i:
         return chr(ord("0") + (key_i - zero_i))
-    text = event.text()
-    if text and len(text) == 1 and text.isprintable():
-        return text
+    sym = _shifted_symbol_char(event)
+    if sym is not None:
+        return sym
+    if key in _KEY_CONSTANTS:
+        return _KEY_CONSTANTS[key]
+    # Ctrl/Alt/Meta combos: never use event.text() (control chars / layout noise).
+    if not _qt_modifiers_held(event):
+        text = event.text()
+        if text and len(text) == 1 and text.isprintable():
+            return text
     try:
         name = QKeySequence(qt_enum_int(key) if key_i is None else key_i).toString().lower()
     except Exception:
