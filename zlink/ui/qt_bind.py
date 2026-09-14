@@ -549,6 +549,8 @@ KEY_MAP_SRC = [
     ("Key_Semicolon", "semicolon"),
     ("Key_Apostrophe", "apostrophe"),
     ("Key_Slash", "slash"),
+    ("Key_Less", "<"),
+    ("Key_Greater", ">"),
     ("Key_F1", "f1"),
     ("Key_F2", "f2"),
     ("Key_F3", "f3"),

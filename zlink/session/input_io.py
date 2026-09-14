@@ -181,6 +181,13 @@ class InputInjector:
         canon = _canonical_key_name(key_name)
         try:
             if action == "down":
+                # Bare period/comma under Shift must not become '.' — wait for symbol char.
+                if (
+                    key_name.lower() in _PUNCT_PHYS
+                    and _shift_held(self._pressed_keys)
+                    and len(key_name) != 1
+                ):
+                    return
                 x11_key = _x11_direct_char(key_name)
                 if x11_key is not None:
                     # Symbol keysym already encodes Shift; drop HW Shift briefly.
@@ -202,7 +209,7 @@ class InputInjector:
                 if len(key_name) == 1 and key_name in _CHAR_X11:
                     _restore_shift_hw_if_held(self._keyboard, self._pressed_keys)
             elif action == "type":
-                self._keyboard.type(key_name)
+                _inject_typed_char(self._keyboard, key_name)
         except Exception:
             log.exception("key inject failed key=%s action=%s", key_name, action)
 
@@ -279,6 +286,20 @@ def _x11_direct_char(name: str):
     return _x11_key_from_symbol(sym)
 
 
+def _inject_typed_char(keyboard: KeyController, text: str) -> None:
+    """Insert one Unicode character without leaving Shift/modifiers stuck (Win client -> Linux)."""
+    if not text:
+        return
+    _release_shift_hw(keyboard)
+    if len(text) == 1:
+        x11_key = _x11_direct_char(text)
+        if x11_key is not None:
+            keyboard.press(x11_key)
+            keyboard.release(x11_key)
+            return
+    keyboard.type(text)
+
+
 _SHIFT_KEYS = (Key.shift, Key.shift_l, Key.shift_r)
 
 
@@ -311,7 +332,7 @@ def _x11_key_from_symbol(symbol: str):
         from_symbol = getattr(KeyCode, "_from_symbol", None)
         if callable(from_symbol):
             key = from_symbol(symbol)
-            if key is not None and getattr(key, "vk", 0):
+            if key is not None:
                 return key
     except Exception:
         log.debug("x11 keysym resolve failed symbol=%s", symbol, exc_info=True)

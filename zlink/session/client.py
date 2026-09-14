@@ -155,6 +155,7 @@ class RemoteCanvas(QWidget):
         self.host_window: Optional["RemoteClientPage"] = None
         # Qt key-up often drops Shift from modifiers(); cache down-name so up matches.
         self._qt_key_down_names: dict[int, str] = {}
+        self._qt_typed_keys: set[int] = set()
         self.setAttribute(WA_OpaquePaintEvent, True)
         self.setAttribute(WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
@@ -364,12 +365,24 @@ class RemoteCanvas(QWidget):
         ):
             self.on_before_remote_paste()
         if not event.isAutoRepeat() and self.on_key:
-            name = _qt_key_name(event)
+            page = self.host_window
+            remote = page._pressed_keys if page is not None else set()
+            name = _qt_key_name(event, remote)
             try:
-                self._qt_key_down_names[qt_enum_int(event.key())] = name
+                key_i = qt_enum_int(event.key())
             except (TypeError, ValueError):
-                pass
-            self.on_key("down", name)
+                key_i = None
+            if _should_type_symbol(name):
+                if key_i is not None:
+                    self._qt_key_down_names[key_i] = name
+                    self._qt_typed_keys.add(key_i)
+                self.on_key("type", name)
+            else:
+                if not _is_shift_key_name(name):
+                    self._sync_remote_shift_down()
+                    if key_i is not None:
+                        self._qt_key_down_names[key_i] = name
+                self.on_key("down", name)
         event.accept()
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:  # noqa: N802
@@ -386,18 +399,43 @@ class RemoteCanvas(QWidget):
             event.accept()
             return
         if not event.isAutoRepeat() and self.on_key:
+            page = self.host_window
+            remote = page._pressed_keys if page is not None else set()
             try:
                 key_i = qt_enum_int(event.key())
             except (TypeError, ValueError):
                 key_i = None
-            name = self._qt_key_down_names.pop(key_i, "") if key_i is not None else ""
-            if not name:
-                name = _qt_key_name(event)
+            if key_i is not None and key_i in self._qt_typed_keys:
+                self._qt_typed_keys.discard(key_i)
+                self._qt_key_down_names.pop(key_i, None)
+                event.accept()
+                return
+            cached = self._qt_key_down_names.pop(key_i, "") if key_i is not None else ""
+            name = _qt_key_release_name(event, cached, remote)
+            if _should_type_symbol(name):
+                event.accept()
+                return
             self.on_key("up", name)
         event.accept()
 
     def clear_key_tracking(self) -> None:
         self._qt_key_down_names.clear()
+        self._qt_typed_keys.clear()
+
+    def _sync_remote_shift_down(self) -> None:
+        """If Shift is physically down but not yet sent, inject shift before the symbol key."""
+        page = self.host_window
+        if page is None or self.on_key is None:
+            return
+        try:
+            app_mods = QApplication.keyboardModifiers()
+        except Exception:
+            return
+        if not qt_has_flag(app_mods, ShiftModifier):
+            return
+        if _remote_shift_marked_down(page._pressed_keys):
+            return
+        self.on_key("down", "shift")
 
     def _overlay_blocks_mouse(self, event: QMouseEvent) -> bool:
         px, py = event_pos(event)
@@ -1376,13 +1414,19 @@ class RemoteClientPage(QWidget):
             self._stop.set()
 
     def _handle_key(self, action: str, key: str) -> None:
-        if not self._input_armed and action != "up":
+        if not self._input_armed and action not in ("up", "type"):
             return
         conn = self._conn
         if not conn or conn.closed:
             return
         key = (key or "").strip()
         if not key:
+            return
+        if action == "type":
+            try:
+                conn.send_json(MsgType.KEY, {"action": "type", "key": key})
+            except (ConnectionError, OSError):
+                self._stop.set()
             return
         if action == "down":
             self._pressed_keys.add(key)
@@ -1436,17 +1480,85 @@ def _only_shift_held(event: QKeyEvent) -> bool:
     )
 
 
-def _shifted_symbol_char(event: QKeyEvent) -> Optional[str]:
+_PUNCT_PHYSICAL_NAMES = frozenset(
+    {
+        "period",
+        "comma",
+        "minus",
+        "equal",
+        "bracketleft",
+        "bracketright",
+        "backslash",
+        "semicolon",
+        "apostrophe",
+        "slash",
+        "grave",
+    }
+)
+# Shift+symbol chars tracked on the remote (for key-up recovery).
+_SHIFT_SYMBOL_CHARS = frozenset("<>~!@#$%^&*()_{|}:?\"+")
+
+
+def _remote_shift_marked_down(remote_pressed: Set[str]) -> bool:
+    return any(k in remote_pressed for k in ("shift", "shift_l", "shift_r"))
+
+
+def _shift_effective(event: QKeyEvent, remote_pressed: Optional[Set[str]] = None) -> bool:
+    if _only_shift_held(event):
+        return True
+    pressed = remote_pressed or set()
+    if _remote_shift_marked_down(pressed):
+        return True
+    try:
+        app_mods = QApplication.keyboardModifiers()
+        if (
+            qt_has_flag(app_mods, ShiftModifier)
+            and not qt_has_flag(app_mods, ControlModifier)
+            and not qt_has_flag(app_mods, AltModifier)
+            and not qt_has_flag(app_mods, MetaModifier)
+        ):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _shifted_symbol_char(event: QKeyEvent, remote_pressed: Optional[Set[str]] = None) -> Optional[str]:
     """Layout-aware Shift+symbol (CN keyboard: Shift+. => '<', not US '>')."""
-    if not _only_shift_held(event):
+    if not _shift_effective(event, remote_pressed):
         return None
     text = event.text()
     if text and len(text) == 1 and text.isprintable() and not text.isalpha():
         return text
+    try:
+        key = event.key()
+        seq = QKeySequence(ShiftModifier | key).toString()
+        if len(seq) == 1 and seq.isprintable() and not seq.isalpha():
+            return seq
+    except Exception:
+        pass
     return None
 
 
-def _qt_key_name(event: QKeyEvent) -> str:
+def _is_shift_key_name(name: str) -> bool:
+    return name.lower() in {"shift", "shift_l", "shift_r"}
+
+
+def _should_type_symbol(name: str) -> bool:
+    """Shift punctuation as one shot — avoids shift+period becoming '.' on Linux."""
+    return len(name) == 1 and name in _SHIFT_SYMBOL_CHARS
+
+
+def _qt_key_release_name(event: QKeyEvent, cached: str, remote_pressed: Set[str]) -> str:
+    if cached:
+        return cached
+    pending = [c for c in _SHIFT_SYMBOL_CHARS if c in remote_pressed]
+    if len(pending) == 1:
+        return pending[0]
+    return _qt_key_name(event, remote_pressed)
+
+
+def _qt_key_name(event: QKeyEvent, remote_pressed: Optional[Set[str]] = None) -> str:
     key = event.key()
     # Physical letters/digits always (Ctrl+C/V, Shift+A, etc.).
     try:
@@ -1461,11 +1573,16 @@ def _qt_key_name(event: QKeyEvent) -> str:
         return chr(ord("a") + (key_i - a_i))
     if key_i is not None and zero_i is not None and nine_i is not None and zero_i <= key_i <= nine_i:
         return chr(ord("0") + (key_i - zero_i))
-    sym = _shifted_symbol_char(event)
+    sym = _shifted_symbol_char(event, remote_pressed)
     if sym is not None:
         return sym
     if key in _KEY_CONSTANTS:
-        return _KEY_CONSTANTS[key]
+        name = _KEY_CONSTANTS[key]
+        if name in _PUNCT_PHYSICAL_NAMES and _shift_effective(event, remote_pressed):
+            sym = _shifted_symbol_char(event, remote_pressed)
+            if sym is not None:
+                return sym
+        return name
     # Ctrl/Alt/Meta combos: never use event.text() (control chars / layout noise).
     if not _qt_modifiers_held(event):
         text = event.text()
