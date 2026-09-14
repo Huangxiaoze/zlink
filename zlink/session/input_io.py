@@ -178,7 +178,7 @@ class InputInjector:
         key_name = str(msg.get("key", ""))
         if not key_name:
             return
-        name_key = key_name.lower()
+        canon = _canonical_key_name(key_name)
         try:
             if action == "down":
                 x11_key = _x11_direct_char(key_name)
@@ -187,14 +187,14 @@ class InputInjector:
                     _release_shift_hw(self._keyboard)
                     self._keyboard.press(x11_key)
                     self._pressed_keys.add(x11_key)
-                    self._injected_by_name[name_key] = x11_key
+                    self._injected_by_name[canon] = x11_key
                 else:
                     key = _resolve_key(key_name, self._pressed_keys)
                     self._keyboard.press(key)
                     self._pressed_keys.add(key)
-                    self._injected_by_name[name_key] = key
+                    self._injected_by_name[canon] = key
             elif action == "up":
-                key = self._injected_by_name.pop(name_key, None)
+                key = self._injected_by_name.pop(canon, None)
                 if key is None:
                     key = _resolve_key(key_name, self._pressed_keys)
                 self._keyboard.release(key)
@@ -254,6 +254,13 @@ def _modifier_held(pressed: Optional[set[Any]]) -> bool:
     if not pressed:
         return False
     return any(key in _MODIFIER_KEYS for key in pressed)
+
+
+def _canonical_key_name(name: str) -> str:
+    """Stable lookup key for press/release pairing (special chars stay literal)."""
+    if len(name) == 1 and name in _CHAR_X11:
+        return name
+    return name.lower()
 
 
 def _shift_held(pressed: Optional[set[Any]]) -> bool:

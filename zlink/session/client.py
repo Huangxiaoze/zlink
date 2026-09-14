@@ -153,6 +153,8 @@ class RemoteCanvas(QWidget):
         # Local chrome keys (fullscreen); return True to swallow.
         self.on_local_key: Optional[Callable[[QKeyEvent], bool]] = None
         self.host_window: Optional["RemoteClientPage"] = None
+        # Qt key-up often drops Shift from modifiers(); cache down-name so up matches.
+        self._qt_key_down_names: dict[int, str] = {}
         self.setAttribute(WA_OpaquePaintEvent, True)
         self.setAttribute(WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
@@ -362,7 +364,12 @@ class RemoteCanvas(QWidget):
         ):
             self.on_before_remote_paste()
         if not event.isAutoRepeat() and self.on_key:
-            self.on_key("down", _qt_key_name(event))
+            name = _qt_key_name(event)
+            try:
+                self._qt_key_down_names[qt_enum_int(event.key())] = name
+            except (TypeError, ValueError):
+                pass
+            self.on_key("down", name)
         event.accept()
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:  # noqa: N802
@@ -379,8 +386,18 @@ class RemoteCanvas(QWidget):
             event.accept()
             return
         if not event.isAutoRepeat() and self.on_key:
-            self.on_key("up", _qt_key_name(event))
+            try:
+                key_i = qt_enum_int(event.key())
+            except (TypeError, ValueError):
+                key_i = None
+            name = self._qt_key_down_names.pop(key_i, "") if key_i is not None else ""
+            if not name:
+                name = _qt_key_name(event)
+            self.on_key("up", name)
         event.accept()
+
+    def clear_key_tracking(self) -> None:
+        self._qt_key_down_names.clear()
 
     def _overlay_blocks_mouse(self, event: QMouseEvent) -> bool:
         px, py = event_pos(event)
@@ -828,6 +845,7 @@ class RemoteClientPage(QWidget):
         conn = self._conn
         stuck = list(self._pressed_keys)
         self._pressed_keys.clear()
+        self.canvas.clear_key_tracking()
         if not conn or conn.closed:
             return
         try:
