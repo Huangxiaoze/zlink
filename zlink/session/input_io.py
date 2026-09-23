@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 # Physical key above Tab. GNOME binds switch-group to <Alt>/<Super>Above_Tab,
 # which is NOT the same keysym as plain grave/` — char injection misses it.
 _GRAVE_NAMES = frozenset({"`", "grave", "quoteleft", "above_tab", "abovetab"})
+_ANGLE_BRACKET_CHARS = frozenset({"<", ">"})
 _MODIFIER_KEYS = frozenset(
     {
         Key.alt,
@@ -143,6 +144,11 @@ class InputInjector:
             return
         name_key = key_name.lower()
         try:
+            if action in ("down", "type") and key_name in _ANGLE_BRACKET_CHARS:
+                _inject_angle_bracket(self._keyboard, key_name, self._pressed_keys)
+                return
+            if action == "up" and key_name in _ANGLE_BRACKET_CHARS:
+                return
             if action == "down":
                 key = _resolve_key(key_name, self._pressed_keys)
                 self._keyboard.press(key)
@@ -207,6 +213,47 @@ def _modifier_held(pressed: Optional[set[Any]]) -> bool:
     if not pressed:
         return False
     return any(key in _MODIFIER_KEYS for key in pressed)
+
+
+def _shift_held(pressed: Optional[set[Any]]) -> bool:
+    if not pressed:
+        return False
+    shift_keys = {Key.shift, Key.shift_l, Key.shift_r}
+    return any(key in shift_keys for key in pressed)
+
+
+_SHIFT_KEYS = (Key.shift, Key.shift_l, Key.shift_r)
+
+
+def _release_shift_hw(keyboard: KeyController) -> None:
+    for sk in _SHIFT_KEYS:
+        try:
+            keyboard.release(sk)
+        except Exception:
+            pass
+
+
+def _restore_shift_hw_if_held(keyboard: KeyController, pressed: set[Any]) -> None:
+    if not _shift_held(pressed):
+        return
+    for sk in _SHIFT_KEYS:
+        try:
+            keyboard.press(sk)
+            return
+        except Exception:
+            continue
+
+
+def _inject_angle_bracket(
+    keyboard: KeyController, char: str, pressed: set[Any]
+) -> None:
+    if char not in _ANGLE_BRACKET_CHARS:
+        return
+    _release_shift_hw(keyboard)
+    try:
+        keyboard.type(char)
+    finally:
+        _restore_shift_hw_if_held(keyboard, pressed)
 
 
 def _x11_key_from_symbol(symbol: str):

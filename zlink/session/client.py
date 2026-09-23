@@ -32,11 +32,13 @@ from ..ui.confirm_dialog import (
 from ..ui.i18n import i18n
 from ..ui.qt_bind import (
     AltModifier,
+    MetaModifier,
     ArrowCursor,
     BlankCursor,
     Antialiasing,
     ApplicationActive,
     ControlModifier,
+    ShiftModifier,
     ElideRight,
     FastTransformation,
     Format_RGB32,
@@ -152,6 +154,7 @@ class RemoteCanvas(QWidget):
         # Local chrome keys (fullscreen); return True to swallow.
         self.on_local_key: Optional[Callable[[QKeyEvent], bool]] = None
         self.host_window: Optional["RemoteClientPage"] = None
+        self._qt_key_down_names: dict[int, str] = {}
         self.setAttribute(WA_OpaquePaintEvent, True)
         self.setAttribute(WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
@@ -361,7 +364,15 @@ class RemoteCanvas(QWidget):
         ):
             self.on_before_remote_paste()
         if not event.isAutoRepeat() and self.on_key:
-            self.on_key("down", _qt_key_name(event))
+            name = _qt_key_name(event)
+            try:
+                self._qt_key_down_names[qt_enum_int(event.key())] = name
+            except (TypeError, ValueError):
+                pass
+            if name in _ANGLE_BRACKET_CHARS:
+                self.on_key("type", name)
+            else:
+                self.on_key("down", name)
         event.accept()
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:  # noqa: N802
@@ -383,8 +394,22 @@ class RemoteCanvas(QWidget):
             event.accept()
             return
         if not event.isAutoRepeat() and self.on_key:
-            self.on_key("up", _qt_key_name(event))
+            try:
+                key_i = qt_enum_int(event.key())
+            except (TypeError, ValueError):
+                key_i = None
+            cached = (
+                self._qt_key_down_names.pop(key_i, "") if key_i is not None else ""
+            )
+            name = cached or _qt_key_name(event)
+            if name in _ANGLE_BRACKET_CHARS:
+                event.accept()
+                return
+            self.on_key("up", name)
         event.accept()
+
+    def clear_key_tracking(self) -> None:
+        self._qt_key_down_names.clear()
 
     def _overlay_blocks_mouse(self, event: QMouseEvent) -> bool:
         px, py = event_pos(event)
@@ -836,6 +861,7 @@ class RemoteClientPage(QWidget):
         conn = self._conn
         stuck = list(self._pressed_keys)
         self._pressed_keys.clear()
+        self.canvas.clear_key_tracking()
         if not conn or conn.closed:
             return
         try:
@@ -1366,13 +1392,19 @@ class RemoteClientPage(QWidget):
             self._stop.set()
 
     def _handle_key(self, action: str, key: str) -> None:
-        if not self._input_armed and action != "up":
+        if not self._input_armed and action not in ("up", "type"):
             return
         conn = self._conn
         if not conn or conn.closed:
             return
         key = (key or "").strip()
         if not key:
+            return
+        if action == "type":
+            try:
+                conn.send_json(MsgType.KEY, {"action": "type", "key": key})
+            except (ConnectionError, OSError):
+                self._stop.set()
             return
         if action == "down":
             self._pressed_keys.add(key)
@@ -1406,6 +1438,28 @@ def _qt_button(button: Any) -> str:
     return "left"
 
 
+_ANGLE_BRACKET_CHARS = frozenset({"<", ">"})
+
+
+def _only_shift_held(event: QKeyEvent) -> bool:
+    mods = event.modifiers()
+    return (
+        qt_has_flag(mods, ShiftModifier)
+        and not qt_has_flag(mods, ControlModifier)
+        and not qt_has_flag(mods, AltModifier)
+        and not qt_has_flag(mods, MetaModifier)
+    )
+
+
+def _angle_bracket_from_shift(event: QKeyEvent) -> Optional[str]:
+    if not _only_shift_held(event):
+        return None
+    text = event.text()
+    if text in _ANGLE_BRACKET_CHARS:
+        return text
+    return None
+
+
 def _qt_key_name(event: QKeyEvent) -> str:
     key = event.key()
     if key in _KEY_CONSTANTS:
@@ -1424,6 +1478,9 @@ def _qt_key_name(event: QKeyEvent) -> str:
         return chr(ord("a") + (key_i - a_i))
     if key_i is not None and zero_i is not None and nine_i is not None and zero_i <= key_i <= nine_i:
         return chr(ord("0") + (key_i - zero_i))
+    bracket = _angle_bracket_from_shift(event)
+    if bracket is not None:
+        return bracket
     text = event.text()
     if text and len(text) == 1 and text.isprintable():
         return text

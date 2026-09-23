@@ -529,6 +529,8 @@ KEY_MAP_SRC = [
     # Key above Tab (US `~). Stable name so Alt/Meta combos can map to X11 Above_Tab.
     ("Key_QuoteLeft", "grave"),
     ("Key_Dead_Grave", "grave"),
+    ("Key_Less", "<"),
+    ("Key_Greater", ">"),
     ("Key_F1", "f1"),
     ("Key_F2", "f2"),
     ("Key_F3", "f3"),
