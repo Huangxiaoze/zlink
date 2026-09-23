@@ -424,6 +424,14 @@ AltModifier = _enum(
     getattr(Qt, "AltModifier", None),
     getattr(getattr(Qt, "KeyboardModifier", None), "AltModifier", None),
 )
+ShiftModifier = _enum(
+    getattr(Qt, "ShiftModifier", None),
+    getattr(getattr(Qt, "KeyboardModifier", None), "ShiftModifier", None),
+)
+MetaModifier = _enum(
+    getattr(Qt, "MetaModifier", None),
+    getattr(getattr(Qt, "KeyboardModifier", None), "MetaModifier", None),
+)
 Key_C = _enum(
     getattr(Qt, "Key_C", None),
     getattr(getattr(Qt, "Key", None), "Key_C", None),
